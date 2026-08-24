@@ -64,30 +64,42 @@ class MasViewModel : ViewModel() {
     fun getCustomerBalance(customerId: String): Double {
         val cust = customers.value.find { it.id == customerId } ?: return 0.0
         val opening = cust.openingBalance
-        val invoices = salesDocs.value.filter { it.customerId == customerId && it.type == "Sales Invoice" && it.status == "Posted" }
-            .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+        // Only Credit sales invoices add to customer receivable balance
+        val creditInvoices = salesDocs.value.filter {
+            it.customerId == customerId && it.type == "Sales Invoice" && it.status == "Posted" && it.saleType != "Cash"
+        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
         val returns = salesDocs.value.filter { it.customerId == customerId && it.type == "Sales Return" }
             .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
         val payments = salesDocs.value.filter { it.customerId == customerId && it.type == "Customer Payment" }
             .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } } +
-            cashBankTxns.value.filter { it.type == "Receipt" && it.description.contains(cust.name, ignoreCase = true) }
-                .sumOf { it.amount }
-        return opening + invoices - returns - payments
+            cashBankTxns.value.filter {
+                it.type == "Receipt" && (it.contraAccount == "Accounts Receivable" || it.description.contains(cust.name, ignoreCase = true)) && it.description.contains(cust.name, ignoreCase = true)
+            }.sumOf { it.amount }
+
+        return opening + creditInvoices - returns - payments
     }
 
     // Helper: Supplier balance calculation
     fun getSupplierBalance(supplierId: String): Double {
         val supp = suppliers.value.find { it.id == supplierId } ?: return 0.0
         val opening = supp.openingBalance
-        val bills = purchaseDocs.value.filter { it.supplierId == supplierId && it.type == "Purchase Bill" && it.status == "Posted" }
-            .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+        // Only Credit purchase bills add to supplier payable balance
+        val creditBills = purchaseDocs.value.filter {
+            it.supplierId == supplierId && it.type == "Purchase Bill" && it.status == "Posted" && it.saleType != "Cash"
+        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
         val returns = purchaseDocs.value.filter { it.supplierId == supplierId && it.type == "Purchase Return" }
             .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
         val payments = purchaseDocs.value.filter { it.supplierId == supplierId && it.type == "Supplier Payment" }
             .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } } +
-            cashBankTxns.value.filter { it.type == "Payment" && it.description.contains(supp.name, ignoreCase = true) }
-                .sumOf { it.amount }
-        return opening + bills - returns - payments
+            cashBankTxns.value.filter {
+                it.type == "Payment" && (it.contraAccount == "Accounts Payable" || it.description.contains(supp.name, ignoreCase = true)) && it.description.contains(supp.name, ignoreCase = true)
+            }.sumOf { it.amount }
+
+        return opening + creditBills - returns - payments
     }
 
     // Helper: Stock item balance
@@ -122,26 +134,26 @@ class MasViewModel : ViewModel() {
         posted.sumOf { it.items.sumOf { l -> l.qty * l.rate } } - returns.sumOf { it.items.sumOf { l -> l.qty * l.rate } }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
-    val totalReceivable = customers.map { list ->
-        list.sumOf { getCustomerBalance(it.id).coerceAtLeast(0.0) }
+    val totalReceivable = combine(customers, salesDocs, cashBankTxns) { custList, _, _ ->
+        custList.sumOf { getCustomerBalance(it.id).coerceAtLeast(0.0) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
-    val totalPayable = suppliers.map { list ->
-        list.sumOf { getSupplierBalance(it.id).coerceAtLeast(0.0) }
+    val totalPayable = combine(suppliers, purchaseDocs, cashBankTxns) { suppList, _, _ ->
+        suppList.sumOf { getSupplierBalance(it.id).coerceAtLeast(0.0) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
-    val cashInHand = cashBankAccounts.map { list ->
-        list.filter { it.kind == "Cash" }.sumOf { acc ->
-            val inTx = cashBankTxns.value.filter { it.accountId == acc.id && it.type == "Receipt" || it.toAccountId == acc.id }.sumOf { it.amount }
-            val outTx = cashBankTxns.value.filter { it.accountId == acc.id && it.type == "Payment" || it.fromAccountId == acc.id }.sumOf { it.amount }
+    val cashInHand = combine(cashBankAccounts, cashBankTxns) { accountsList, txnsList ->
+        accountsList.filter { it.kind == "Cash" }.sumOf { acc ->
+            val inTx = txnsList.filter { (it.accountId == acc.id && it.type == "Receipt") || it.toAccountId == acc.id }.sumOf { it.amount }
+            val outTx = txnsList.filter { (it.accountId == acc.id && it.type == "Payment") || it.fromAccountId == acc.id }.sumOf { it.amount }
             acc.openingBalance + inTx - outTx
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
-    val bankBalance = cashBankAccounts.map { list ->
-        list.filter { it.kind == "Bank" }.sumOf { acc ->
-            val inTx = cashBankTxns.value.filter { it.accountId == acc.id && it.type == "Receipt" || it.toAccountId == acc.id }.sumOf { it.amount }
-            val outTx = cashBankTxns.value.filter { it.accountId == acc.id && it.type == "Payment" || it.fromAccountId == acc.id }.sumOf { it.amount }
+    val bankBalance = combine(cashBankAccounts, cashBankTxns) { accountsList, txnsList ->
+        accountsList.filter { it.kind == "Bank" }.sumOf { acc ->
+            val inTx = txnsList.filter { (it.accountId == acc.id && it.type == "Receipt") || it.toAccountId == acc.id }.sumOf { it.amount }
+            val outTx = txnsList.filter { (it.accountId == acc.id && it.type == "Payment") || it.fromAccountId == acc.id }.sumOf { it.amount }
             acc.openingBalance + inTx - outTx
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
@@ -201,10 +213,14 @@ class MasViewModel : ViewModel() {
         salesDocs.value = salesDocs.value + paymentDoc
 
         // Post into cash bank transactions and journal
+        val matchedAcc = cashBankAccounts.value.find { it.name.equals(depositAccount, ignoreCase = true) }
+            ?: cashBankAccounts.value.firstOrNull { if (depositAccount.contains("Bank", ignoreCase = true)) it.kind == "Bank" else it.kind == "Cash" }
+            ?: cashBankAccounts.value.firstOrNull()
+
         val txn = CashBankTxn(
             id = "RCT-${System.currentTimeMillis() % 10000}",
             type = "Receipt",
-            accountId = cashBankAccounts.value.find { it.name.equals(depositAccount, ignoreCase = true) }?.id ?: "ACC-001",
+            accountId = matchedAcc?.id ?: "ACC-001",
             date = today,
             description = "Receipt from ${cust.name} ${if (invoiceId != null) "for $invoiceId" else ""}",
             contraAccount = "Accounts Receivable",
@@ -236,21 +252,59 @@ class MasViewModel : ViewModel() {
         // If it's a posted invoice, post journal and update inventory if items are linked
         if (doc.type == "Sales Invoice" && doc.status == "Posted") {
             val total = doc.items.sumOf { it.qty * it.rate }
-            val (debitAccount, creditAccount) = if (doc.saleType == "Cash") Pair("Cash", "Sales Revenue") else Pair("Accounts Receivable", "Sales Revenue")
 
-            MasRepository.postJournalEntry(
-                JournalEntry(
-                    id = "JE-${doc.id}",
-                    date = doc.date,
-                    source = "Sales",
-                    description = "Sales Invoice ${doc.id}",
-                    reference = doc.id,
-                    lines = listOf(
-                        JournalLine(debitAccount, total, 0.0),
-                        JournalLine(creditAccount, 0.0, total)
+            if (doc.saleType == "Cash") {
+                val selectedAccount = doc.paymentAccount ?: "Cash in Hand"
+                val glAccountName = if (selectedAccount.contains("Bank", ignoreCase = true)) "Bank" else "Cash in Hand"
+
+                // 1. Post General Ledger double-entry
+                MasRepository.postJournalEntry(
+                    JournalEntry(
+                        id = "JE-${doc.id}",
+                        date = doc.date,
+                        source = "Sales",
+                        description = "Cash Sale — Invoice ${doc.id}",
+                        reference = doc.id,
+                        lines = listOf(
+                            JournalLine(glAccountName, total, 0.0),
+                            JournalLine("Sales Revenue", 0.0, total)
+                        )
                     )
                 )
-            )
+
+                // 2. Post Cash / Bank Ledger Transaction
+                val matchedAccount = cashBankAccounts.value.find { it.name.equals(selectedAccount, ignoreCase = true) }
+                    ?: cashBankAccounts.value.firstOrNull { if (selectedAccount.contains("Bank", ignoreCase = true)) it.kind == "Bank" else it.kind == "Cash" }
+                    ?: cashBankAccounts.value.firstOrNull()
+
+                val cashTxn = CashBankTxn(
+                    id = "RCT-${System.currentTimeMillis() % 10000}",
+                    type = "Receipt",
+                    accountId = matchedAccount?.id ?: "ACC-001",
+                    date = doc.date,
+                    description = "Cash Sale — ${doc.id} (${doc.items.firstOrNull()?.description ?: "Goods"})",
+                    contraAccount = "Sales Revenue",
+                    amount = total,
+                    reference = doc.id
+                )
+                cashBankTxns.value = cashBankTxns.value + cashTxn
+            } else {
+                // Credit Sale
+                val cust = customers.value.find { it.id == doc.customerId }
+                MasRepository.postJournalEntry(
+                    JournalEntry(
+                        id = "JE-${doc.id}",
+                        date = doc.date,
+                        source = "Sales",
+                        description = "Credit Sale — Invoice ${doc.id} (${cust?.name ?: doc.customerId})",
+                        reference = doc.id,
+                        lines = listOf(
+                            JournalLine("Accounts Receivable", total, 0.0),
+                            JournalLine("Sales Revenue", 0.0, total)
+                        )
+                    )
+                )
+            }
 
             // Deduct inventory for linked stock items
             doc.items.filter { it.itemId != null }.forEach { item ->
@@ -266,7 +320,7 @@ class MasViewModel : ViewModel() {
                 stockMoves.value = stockMoves.value + move
             }
         }
-        showMessage("${doc.type} ${doc.id} recorded.")
+        showMessage("${doc.type} ${doc.id} recorded successfully.")
     }
 
     // Purchase Actions
@@ -275,21 +329,59 @@ class MasViewModel : ViewModel() {
 
         if (doc.type == "Purchase Bill" && doc.status == "Posted") {
             val total = doc.items.sumOf { it.qty * it.rate }
-            val (debitAccount, creditAccount) = if (doc.saleType == "Cash") Pair("Purchases", "Cash") else Pair("Purchases", "Accounts Payable")
 
-            MasRepository.postJournalEntry(
-                JournalEntry(
-                    id = "JE-${doc.id}",
-                    date = doc.date,
-                    source = "Purchases",
-                    description = "Purchase Bill ${doc.id}",
-                    reference = doc.id,
-                    lines = listOf(
-                        JournalLine(debitAccount, total, 0.0),
-                        JournalLine(creditAccount, 0.0, total)
+            if (doc.saleType == "Cash") {
+                val selectedAccount = doc.paymentAccount ?: "Cash in Hand"
+                val glAccountName = if (selectedAccount.contains("Bank", ignoreCase = true)) "Bank" else "Cash in Hand"
+
+                // 1. Post General Ledger double-entry
+                MasRepository.postJournalEntry(
+                    JournalEntry(
+                        id = "JE-${doc.id}",
+                        date = doc.date,
+                        source = "Purchases",
+                        description = "Cash Purchase — Bill ${doc.id}",
+                        reference = doc.id,
+                        lines = listOf(
+                            JournalLine("Purchases", total, 0.0),
+                            JournalLine(glAccountName, 0.0, total)
+                        )
                     )
                 )
-            )
+
+                // 2. Post Cash / Bank Ledger Transaction
+                val matchedAccount = cashBankAccounts.value.find { it.name.equals(selectedAccount, ignoreCase = true) }
+                    ?: cashBankAccounts.value.firstOrNull { if (selectedAccount.contains("Bank", ignoreCase = true)) it.kind == "Bank" else it.kind == "Cash" }
+                    ?: cashBankAccounts.value.firstOrNull()
+
+                val cashTxn = CashBankTxn(
+                    id = "PMT-${System.currentTimeMillis() % 10000}",
+                    type = "Payment",
+                    accountId = matchedAccount?.id ?: "ACC-001",
+                    date = doc.date,
+                    description = "Cash Purchase — ${doc.id} (${doc.items.firstOrNull()?.description ?: "Goods"})",
+                    contraAccount = "Purchases",
+                    amount = total,
+                    reference = doc.id
+                )
+                cashBankTxns.value = cashBankTxns.value + cashTxn
+            } else {
+                // Credit Purchase
+                val supp = suppliers.value.find { it.id == doc.supplierId }
+                MasRepository.postJournalEntry(
+                    JournalEntry(
+                        id = "JE-${doc.id}",
+                        date = doc.date,
+                        source = "Purchases",
+                        description = "Credit Purchase — Bill ${doc.id} (${supp?.name ?: doc.supplierId})",
+                        reference = doc.id,
+                        lines = listOf(
+                            JournalLine("Purchases", total, 0.0),
+                            JournalLine("Accounts Payable", 0.0, total)
+                        )
+                    )
+                )
+            }
 
             // Add stock for linked items
             doc.items.filter { it.itemId != null }.forEach { item ->
@@ -306,7 +398,7 @@ class MasViewModel : ViewModel() {
                 stockMoves.value = stockMoves.value + move
             }
         }
-        showMessage("${doc.type} ${doc.id} recorded.")
+        showMessage("${doc.type} ${doc.id} recorded successfully.")
     }
 
     // Supplier Payment

@@ -100,6 +100,7 @@ data class SalesDoc(
     val type: String, // Quotation, Sales Order, Sales Invoice, Sales Return, Credit Note, Customer Payment
     val saleType: String? = null, // Credit, Cash
     val customerId: String,
+    val paymentAccount: String? = null, // Cash in Hand, Bank, etc.
     val date: String,
     val dueDate: String? = null,
     val items: List<LineItem>,
@@ -114,6 +115,7 @@ data class PurchaseDoc(
     val type: String, // Purchase Order, Purchase Bill, Purchase Return, Debit Note, Supplier Payment
     val saleType: String? = null, // Credit, Cash
     val supplierId: String,
+    val paymentAccount: String? = null, // Cash in Hand, Bank, etc.
     val date: String,
     val dueDate: String? = null,
     val items: List<LineItem>,
