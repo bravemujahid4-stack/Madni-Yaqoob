@@ -1,0 +1,73 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="14"
+        android:translateY="29"
+        android:scaleX="0.74"
+        android:scaleY="0.74">
+        
+        <!-- M: Left arch and main red body -->
+        <path
+            android:pathData="M 4,56 C 2,52 1,44 4,36 C 8,26 18,20 28,20 C 37,20 44,26 49,36 L 53,44 L 57,36 C 62,26 69,20 78,20 C 88,20 98,26 102,36 C 105,44 104,52 102,56 L 90,56 C 92,53 92,47 90,42 C 88,36 82,32 76,32 C 70,32 64,36 62,43 L 56,56 L 50,56 L 44,43 C 42,36 36,32 30,32 C 24,32 18,36 16,42 C 14,47 14,53 16,56 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="4"
+                    android:startY="20"
+                    android:endX="104"
+                    android:endY="56"
+                    android:type="linear">
+                    <item android:color="#E51937" android:offset="0.0" />
+                    <item android:color="#AE1932" android:offset="0.6" />
+                    <item android:color="#7A0E22" android:offset="1.0" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Red dynamic swoosh stroke across MAS -->
+        <path
+            android:pathData="M 8,50 C 24,38 52,32 82,40 C 94,44 104,49 110,54 L 102,56 C 96,52 88,48 78,45 C 50,38 26,44 12,54 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="8"
+                    android:startY="35"
+                    android:endX="110"
+                    android:endY="55"
+                    android:type="linear">
+                    <item android:color="#FF2E4D" android:offset="0.0" />
+                    <item android:color="#AE1932" android:offset="1.0" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- A: Charcoal/Grey frame -->
+        <path
+            android:pathData="M 52,18 L 62,18 L 76,56 L 64,56 L 61,48 L 47,48 L 47,40 L 58,40 L 54,29 Z"
+            android:fillColor="#454545" />
+
+        <!-- S: Charcoal/Grey curves -->
+        <path
+            android:pathData="M 80,48 C 80,44 84,40 92,40 C 98,40 104,42 106,45 L 108,36 C 104,33 98,31 90,31 C 78,31 70,38 70,47 C 70,55 77,59 86,61 C 94,63 98,65 98,69 C 98,74 92,77 84,77 C 76,77 69,73 66,69 L 63,77 C 68,82 76,85 86,85 C 99,85 108,78 108,68 C 108,59 101,55 92,53 C 84,51 80,49 80,48 Z"
+            android:fillColor="#3A3A3A" />
+
+        <!-- Red upper wing on S -->
+        <path
+            android:pathData="M 98,25 L 110,25 L 102,33 L 90,33 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="90"
+                    android:startY="25"
+                    android:endX="110"
+                    android:endY="33"
+                    android:type="linear">
+                    <item android:color="#FF2E4D" android:offset="0.0" />
+                    <item android:color="#AE1932" android:offset="1.0" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+</vector>
+

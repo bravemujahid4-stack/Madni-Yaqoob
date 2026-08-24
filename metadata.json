@@ -1,0 +1,7 @@
+{
+  "name": "MAS",
+  "description": "MAS - Mobile ERP & Accounting Management System for sales, purchases, inventory, manufacturing, general ledger, and financial reporting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
