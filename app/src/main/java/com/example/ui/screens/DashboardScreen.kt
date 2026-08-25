@@ -223,7 +223,7 @@ fun DashboardScreen(
                     ) {
                         QuickActionItem("New Sale", Icons.Default.PointOfSale, MasRed) { onNavigateToModule("step6") }
                         QuickActionItem("Purchase", Icons.Default.AddShoppingCart, MasAmber) { onNavigateToModule("step8") }
-                        QuickActionItem("Parties/Excel", Icons.Default.Groups, Color(0xFF673AB7)) { onNavigateToModule("parties") }
+                        QuickActionItem("Receipt", Icons.Default.Receipt, MasGreen) { onNavigateToModule("step5") }
                         QuickActionItem("Expense", Icons.Default.CreditCard, MasBlue) { onNavigateToModule("step10") }
                     }
                     Spacer(modifier = Modifier.height(8.dp))

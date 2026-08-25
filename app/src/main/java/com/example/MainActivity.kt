@@ -219,6 +219,17 @@ fun MasErpApp(viewModel: MasViewModel = viewModel()) {
                         )
                     )
                     NavigationBarItem(
+                        selected = currentRoute == "step4",
+                        onClick = { currentRoute = "step4" },
+                        icon = { Icon(Icons.Default.Book, contentDescription = "Ledger") },
+                        label = { Text("Ledger", fontSize = 11.sp) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MasRed,
+                            selectedTextColor = MasRed,
+                            indicatorColor = MasRedLight
+                        )
+                    )
+                    NavigationBarItem(
                         selected = currentRoute == "step6",
                         onClick = { currentRoute = "step6" },
                         icon = { Icon(Icons.Default.PointOfSale, contentDescription = "Sales") },
@@ -234,17 +245,6 @@ fun MasErpApp(viewModel: MasViewModel = viewModel()) {
                         onClick = { currentRoute = "step8" },
                         icon = { Icon(Icons.Default.ShoppingCart, contentDescription = "Purchases") },
                         label = { Text("Purchases", fontSize = 11.sp) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MasRed,
-                            selectedTextColor = MasRed,
-                            indicatorColor = MasRedLight
-                        )
-                    )
-                    NavigationBarItem(
-                        selected = currentRoute == "step4",
-                        onClick = { currentRoute = "step4" },
-                        icon = { Icon(Icons.Default.Book, contentDescription = "GL") },
-                        label = { Text("Ledger", fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MasRed,
                             selectedTextColor = MasRed,
