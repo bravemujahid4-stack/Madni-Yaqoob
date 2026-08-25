@@ -66,10 +66,10 @@ fun FinancialReportsScreen(viewModel: MasViewModel) {
 
         when (reportType) {
             "pl" -> ProfitAndLossStatement(totalSales, totalPurchases, totalExpenses, netProfit)
-            "bs" -> BalanceSheetStatement(cashInHand, bankBalance, totalReceivable, stockValuation, netFixedAssets, totalPayable, netProfit)
+            "bs" -> BalanceSheetStatement(accounts, cashInHand, bankBalance, totalReceivable, stockValuation, netFixedAssets, totalPayable, netProfit)
             "tb" -> TrialBalanceStatement(accounts, journal)
             "cf" -> CashFlowStatement(totalSales, totalPurchases, totalExpenses, cashInHand + bankBalance)
-            "equity" -> ChangesInEquityStatement(netProfit)
+            "equity" -> ChangesInEquityStatement(accounts, netProfit)
         }
     }
 }
@@ -120,6 +120,7 @@ fun ProfitAndLossStatement(sales: Double, costOfSales: Double, expenses: Double,
 
 @Composable
 fun BalanceSheetStatement(
+    accounts: List<Account>,
     cash: Double,
     bank: Double,
     receivables: Double,
@@ -130,9 +131,12 @@ fun BalanceSheetStatement(
 ) {
     val currentAssets = cash + bank + receivables + stock
     val totalAssets = currentAssets + fixedAssets
-    val shareCapital = 1000000.0
-    val retainedEarnings = 150000.0 + netProfit
-    val totalEquity = shareCapital + retainedEarnings
+    val capitalAccount = accounts.find { it.type == AccountType.Equity && (it.name.contains("Capital", ignoreCase = true) || it.name.contains("Owner", ignoreCase = true)) }
+    val openingCapital = capitalAccount?.opening ?: 0.0
+    val retainedAccount = accounts.find { it.type == AccountType.Equity && it.name.contains("Retained", ignoreCase = true) }
+    val openingRetained = retainedAccount?.opening ?: 0.0
+    val retainedEarnings = openingRetained + netProfit
+    val totalEquity = openingCapital + retainedEarnings
     val totalLiabilitiesAndEquity = payables + totalEquity
 
     LazyColumn(
@@ -173,7 +177,7 @@ fun BalanceSheetStatement(
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Equity:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                    ReportRow("Paid-up Capital", shareCapital, indent = true)
+                    ReportRow("Paid-up Capital", openingCapital, indent = true)
                     ReportRow("Retained Earnings + Current Profit", retainedEarnings, indent = true)
                     ReportRow("Total Equity", totalEquity, isBold = true)
 
@@ -253,16 +257,16 @@ fun CashFlowStatement(sales: Double, purchases: Double, expenses: Double, cashCl
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
                     Text("Operating Activities:", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
-                    ReportRow("Cash Receipts from Customers", sales * 0.9, indent = true)
-                    ReportRow("Cash Paid to Suppliers", -(purchases * 0.85), indent = true)
+                    ReportRow("Cash Receipts from Sales", sales, indent = true)
+                    ReportRow("Cash Paid for Purchases", -purchases, indent = true)
                     ReportRow("Cash Paid for Operating Expenses", -expenses, indent = true)
 
-                    val netOp = (sales * 0.9) - (purchases * 0.85) - expenses
+                    val netOp = sales - purchases - expenses
                     ReportRow("Net Cash from Operations", netOp, isBold = true, color = if (netOp >= 0) MasGreen else MasRed)
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Investing & Financing Activities:", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
-                    ReportRow("Capital Infusion", 0.0, indent = true)
+                    ReportRow("Capital Infusion / Drawings", 0.0, indent = true)
 
                     Surface(color = MasPaperSoft, shape = RoundedCornerShape(6.dp)) {
                         ReportRow("Closing Cash & Bank Balance", cashClosing, isBold = true, color = MasInk, modifier = Modifier.padding(8.dp))
@@ -274,9 +278,14 @@ fun CashFlowStatement(sales: Double, purchases: Double, expenses: Double, cashCl
 }
 
 @Composable
-fun ChangesInEquityStatement(netProfit: Double) {
-    val openingCapital = 1000000.0
-    val openingRetained = 150000.0
+fun ChangesInEquityStatement(accounts: List<Account>, netProfit: Double) {
+    val capitalAccount = accounts.find { it.type == AccountType.Equity && (it.name.contains("Capital", ignoreCase = true) || it.name.contains("Owner", ignoreCase = true)) }
+    val openingCapital = capitalAccount?.opening ?: 0.0
+    val retainedAccount = accounts.find { it.type == AccountType.Equity && it.name.contains("Retained", ignoreCase = true) }
+    val openingRetained = retainedAccount?.opening ?: 0.0
+    val drawingsAccount = accounts.find { it.type == AccountType.Equity && it.name.contains("Drawing", ignoreCase = true) }
+    val drawings = drawingsAccount?.opening ?: 0.0
+    val endingEquity = openingCapital + openingRetained + netProfit - drawings
 
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -292,13 +301,13 @@ fun ChangesInEquityStatement(netProfit: Double) {
                     Text("Statement of Changes in Equity", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
-                    ReportRow("Share Capital (Opening)", openingCapital)
+                    ReportRow("Share / Owner Capital (Opening)", openingCapital)
                     ReportRow("Retained Earnings (Opening)", openingRetained)
-                    ReportRow("Net Profit for the Period", netProfit, color = MasGreen)
-                    ReportRow("Dividends / Drawings", 0.0)
+                    ReportRow("Net Profit for the Period", netProfit, color = if (netProfit >= 0) MasGreen else MasRed)
+                    ReportRow("Dividends / Drawings", drawings)
 
                     Surface(color = MasPaperSoft, shape = RoundedCornerShape(6.dp)) {
-                        ReportRow("Total Equity at End of Period", openingCapital + openingRetained + netProfit, isBold = true, color = MasInk, modifier = Modifier.padding(8.dp))
+                        ReportRow("Total Equity at End of Period", endingEquity, isBold = true, color = MasInk, modifier = Modifier.padding(8.dp))
                     }
                 }
             }

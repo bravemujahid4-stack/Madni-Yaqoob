@@ -14,6 +14,7 @@ class MasViewModel : ViewModel() {
     val currentUser = MasRepository.currentUser
     val companyProfile = MasRepository.companyProfile
     val accounts = MasRepository.accounts
+    val partyAccounts = MasRepository.partyAccounts
     val journal = MasRepository.journal
     val customers = MasRepository.customers
     val suppliers = MasRepository.suppliers
@@ -254,8 +255,8 @@ class MasViewModel : ViewModel() {
             val total = doc.items.sumOf { it.qty * it.rate }
 
             if (doc.saleType == "Cash") {
-                val selectedAccount = doc.paymentAccount ?: "Cash in Hand"
-                val glAccountName = if (selectedAccount.contains("Bank", ignoreCase = true)) "Bank" else "Cash in Hand"
+                val selectedAccount = doc.paymentAccount ?: (cashBankAccounts.value.firstOrNull()?.name ?: "Khalid Cash 1")
+                val glAccountName = selectedAccount
 
                 // 1. Post General Ledger double-entry
                 MasRepository.postJournalEntry(
@@ -331,8 +332,8 @@ class MasViewModel : ViewModel() {
             val total = doc.items.sumOf { it.qty * it.rate }
 
             if (doc.saleType == "Cash") {
-                val selectedAccount = doc.paymentAccount ?: "Cash in Hand"
-                val glAccountName = if (selectedAccount.contains("Bank", ignoreCase = true)) "Bank" else "Cash in Hand"
+                val selectedAccount = doc.paymentAccount ?: (cashBankAccounts.value.firstOrNull()?.name ?: "Khalid Cash 1")
+                val glAccountName = selectedAccount
 
                 // 1. Post General Ledger double-entry
                 MasRepository.postJournalEntry(
@@ -620,10 +621,50 @@ class MasViewModel : ViewModel() {
         return true
     }
 
-    // Account creation
+    // Account creation & Opening balance update
     fun addAccount(account: Account) {
         accounts.value = accounts.value + account
         MasRepository.logAudit("Chart of Accounts", "Create", account.code, "Created account ${account.name}")
         showMessage("Account ${account.name} added.")
+    }
+
+    fun updateCashBankAccountOpening(accountId: String, newOpening: Double) {
+        cashBankAccounts.value = cashBankAccounts.value.map {
+            if (it.id == accountId) it.copy(openingBalance = newOpening) else it
+        }
+        val acc = cashBankAccounts.value.find { it.id == accountId }
+        if (acc != null) {
+            // Also update in General Ledger Chart of Accounts opening
+            accounts.value = accounts.value.map {
+                if (it.name.equals(acc.name, ignoreCase = true)) it.copy(opening = newOpening) else it
+            }
+            MasRepository.logAudit("Cash & Bank", "Update Opening", accountId, "Set opening balance of ${acc.name} to $newOpening")
+            showMessage("Opening balance of ${acc.name} updated to Rs $newOpening.")
+        }
+    }
+
+    // Party / Account Management & Excel/CSV Import
+    fun getNextPartyCode(type: PartyAccountType): String {
+        return MasRepository.getNextPartyCode(type)
+    }
+
+    fun savePartyAccount(account: PartyAccount, updateExisting: Boolean = false): Boolean {
+        val success = MasRepository.savePartyAccount(account, updateExisting)
+        if (success) {
+            showMessage("${account.accountType.displayName} ${account.name} (${account.code}) saved successfully.")
+        } else {
+            showMessage("Account with code or name already exists in ${account.accountType.displayName}.")
+        }
+        return success
+    }
+
+    fun deletePartyAccount(id: String) {
+        MasRepository.deletePartyAccount(id)
+        showMessage("Account removed.")
+    }
+
+    fun importPartyAccounts(rows: List<ImportedAccountRow>, duplicateStrategy: DuplicateStrategy) {
+        val (imported, updated) = MasRepository.importPartyAccounts(rows, duplicateStrategy)
+        showMessage("Import completed: $imported new accounts added, $updated updated.")
     }
 }

@@ -153,7 +153,7 @@ fun NewSaleForm(
     
     var docType by remember { mutableStateOf("Sales Invoice") }
     var saleType by remember { mutableStateOf("Cash") } // "Cash" or "Credit"
-    var selectedPaymentAccount by remember { mutableStateOf("Cash in Hand") }
+    var selectedPaymentAccount by remember { mutableStateOf(cashBankAccounts.firstOrNull()?.name ?: "Khalid Cash 1") }
     var selectedCustId by remember { mutableStateOf(customers.firstOrNull()?.id ?: "") }
     var date by remember { mutableStateOf(sdf.format(Date())) }
 

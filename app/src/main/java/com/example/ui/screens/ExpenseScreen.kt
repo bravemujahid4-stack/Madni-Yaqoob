@@ -154,8 +154,8 @@ fun NewExpenseForm(
     var category by remember { mutableStateOf(categories.firstOrNull() ?: "Factory Power & Electricity") }
     var payee by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
-    var paymentType by remember { mutableStateOf("Cash") }
-    var paidFrom by remember { mutableStateOf("Cash") }
+    val cashBankAccounts by viewModel.cashBankAccounts.collectAsState()
+    var paidFrom by remember { mutableStateOf(cashBankAccounts.firstOrNull()?.name ?: "Khalid Cash 1") }
     var date by remember { mutableStateOf(sdf.format(Date())) }
 
     val amountVal = amount.toDoubleOrNull() ?: 0.0
@@ -196,9 +196,23 @@ fun NewExpenseForm(
                     OutlinedTextField(value = payee, onValueChange = { payee = it }, label = { Text("Paid To / Vendor / Narration *") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Expense Amount *") }, modifier = Modifier.fillMaxWidth())
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(value = paymentType, onValueChange = { paymentType = it }, label = { Text("Payment Type (Cash/Payable)") }, modifier = Modifier.weight(1f))
-                        OutlinedTextField(value = paidFrom, onValueChange = { paidFrom = it }, label = { Text("Paid From Account") }, modifier = Modifier.weight(1f))
+                    Text("Paid From (Cash / Bank Account)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    var accExpanded by remember { mutableStateOf(false) }
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedCard(modifier = Modifier.fillMaxWidth().clickable { accExpanded = true }, shape = RoundedCornerShape(8.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(paidFrom, fontSize = 13.sp)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                        }
+                        DropdownMenu(expanded = accExpanded, onDismissRequest = { accExpanded = false }) {
+                            cashBankAccounts.forEach { acc ->
+                                DropdownMenuItem(text = { Text("${acc.name} (${acc.kind})") }, onClick = {
+                                    paidFrom = acc.name
+                                    accExpanded = false
+                                })
+                            }
+                        }
                     }
 
                     OutlinedTextField(value = date, onValueChange = { date = it }, label = { Text("Expense Date") }, modifier = Modifier.fillMaxWidth())
@@ -213,7 +227,7 @@ fun NewExpenseForm(
                                     category = category,
                                     description = payee.trim(),
                                     amount = amountVal,
-                                    paymentType = paymentType,
+                                    paymentType = if (paidFrom.contains("Bank", ignoreCase = true)) "Bank" else "Cash",
                                     paidFrom = paidFrom,
                                     payee = payee.trim(),
                                     status = "Posted"

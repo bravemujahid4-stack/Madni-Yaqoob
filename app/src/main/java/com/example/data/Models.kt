@@ -12,6 +12,83 @@ enum class AccountType(val displayName: String, val normalBalance: String) {
     Expenses("Expenses", "Debit")
 }
 
+// 6 Dedicated Party / Account Types with exact Code Prefixes
+enum class PartyAccountType(
+    val displayName: String,
+    val codePrefix: String,
+    val defaultGlType: AccountType,
+    val defaultNature: String,
+    val defaultCategory: String
+) {
+    Owner("Owner", "OWN", AccountType.Equity, "Credit", "Owner Capital"),
+    Investor("Investor", "INS", AccountType.Liabilities, "Credit", "Investor Account"),
+    Factory("Factory", "FAC", AccountType.Expenses, "Debit", "Factory Operations"),
+    LabourEmployee("Labour & Employee", "LAB", AccountType.Expenses, "Debit", "Labour & Salaries"),
+    Customer("Customer", "CUS", AccountType.Assets, "Debit", "Accounts Receivable"),
+    CashInHand("Cash In Hand", "CASH", AccountType.Assets, "Debit", "Cash in Hand");
+
+    companion object {
+        fun fromString(str: String?): PartyAccountType? {
+            if (str.isNullOrBlank()) return null
+            val s = str.trim()
+            return when {
+                s.equals("Owner", ignoreCase = true) || s.startsWith("OWN", ignoreCase = true) || s.contains("Owner", ignoreCase = true) || s.contains("Proprietor", ignoreCase = true) || s.contains("Partner", ignoreCase = true) -> Owner
+                s.equals("Investor", ignoreCase = true) || s.startsWith("INS", ignoreCase = true) || s.startsWith("INV", ignoreCase = true) || s.contains("Investor", ignoreCase = true) || s.contains("Investment", ignoreCase = true) -> Investor
+                s.equals("Factory", ignoreCase = true) || s.startsWith("FAC", ignoreCase = true) || s.contains("Factory", ignoreCase = true) || s.contains("Karkhana", ignoreCase = true) || s.contains("Mill", ignoreCase = true) || s.contains("Plant", ignoreCase = true) -> Factory
+                s.equals("Labour & Employee", ignoreCase = true) || s.startsWith("LAB", ignoreCase = true) || s.contains("Labour", ignoreCase = true) || s.contains("Labor", ignoreCase = true) || s.contains("Employee", ignoreCase = true) || s.contains("Worker", ignoreCase = true) || s.contains("Staff", ignoreCase = true) || s.contains("Salary", ignoreCase = true) -> LabourEmployee
+                s.equals("Customer", ignoreCase = true) || s.startsWith("CUS", ignoreCase = true) || s.contains("Customer", ignoreCase = true) || s.contains("Client", ignoreCase = true) || s.contains("Buyer", ignoreCase = true) || s.contains("Debtor", ignoreCase = true) -> Customer
+                s.equals("Cash In Hand", ignoreCase = true) || s.startsWith("CASH", ignoreCase = true) || s.contains("Cash In Hand", ignoreCase = true) || s.contains("Cash", ignoreCase = true) || s.contains("Cashier", ignoreCase = true) || s.contains("Till", ignoreCase = true) || s.contains("Petty", ignoreCase = true) -> CashInHand
+                else -> null
+            }
+        }
+    }
+}
+
+data class PartyAccount(
+    val id: String,
+    val code: String,
+    val name: String,
+    val accountType: PartyAccountType,
+    val openingBalance: Double = 0.0,
+    val balanceType: String = if (accountType == PartyAccountType.Owner || accountType == PartyAccountType.Investor) "Credit" else "Debit", // Debit (Get) or Credit (Give)
+    val phone: String = "",
+    val address: String = "",
+    val notes: String = "",
+    val active: Boolean = true,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class ImportedAccountRow(
+    val rowIndex: Int,
+    val rawCode: String = "",
+    val assignedCode: String = "",
+    val name: String = "",
+    val categoryString: String = "",
+    val resolvedType: PartyAccountType? = null,
+    val openingBalance: Double = 0.0,
+    val balanceType: String = "Debit", // Debit (Get/Dr) or Credit (Give/Cr)
+    val phone: String = "",
+    val address: String = "",
+    val notes: String = "",
+    val status: String = "Ready", // Ready, Duplicate, Invalid, Missing Name, Missing Category
+    val duplicateReason: String? = null,
+    val existingAccountId: String? = null
+)
+
+enum class DuplicateStrategy(val label: String) {
+    UpdateExisting("Update Existing"),
+    SkipDuplicates("Skip Duplicates")
+}
+
+data class ImportPreviewResult(
+    val fileName: String,
+    val totalRows: Int,
+    val readyCount: Int,
+    val duplicateCount: Int,
+    val invalidCount: Int,
+    val rows: List<ImportedAccountRow>
+)
+
 data class Account(
     val id: String,
     val code: String,

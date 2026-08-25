@@ -25,7 +25,10 @@ import com.example.ui.viewmodel.MasViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChartOfAccountsScreen(viewModel: MasViewModel) {
+fun ChartOfAccountsScreen(
+    viewModel: MasViewModel,
+    onNavigateToParties: () -> Unit = {}
+) {
     val accounts by viewModel.accounts.collectAsState()
     var selectedTypeFilter by remember { mutableStateOf<AccountType?>(null) }
     var searchQuery by remember { mutableStateOf("") }
@@ -53,14 +56,27 @@ fun ChartOfAccountsScreen(viewModel: MasViewModel) {
                 title = "Chart of Accounts",
                 subtitle = "Central accounts structure powering all double-entry postings.",
                 actionButton = {
-                    Button(
-                        onClick = { showAddDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = MasRed),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Account", fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = onNavigateToParties,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MasRed),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MasRed)
+                        ) {
+                            Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Parties & Excel Import", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        Button(
+                            onClick = { showAddDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = MasRed),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Add Account", fontSize = 12.sp)
+                        }
                     }
                 }
             )

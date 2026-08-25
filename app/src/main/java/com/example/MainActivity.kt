@@ -86,6 +86,7 @@ fun MasErpApp(viewModel: MasViewModel = viewModel()) {
 
         // Core Accounting
         NavMenuItem("step2", "Company & Fiscal Setup", "Core Finance", Icons.Default.Business),
+        NavMenuItem("parties", "Parties & Account Types", "Core Finance", Icons.Default.Groups),
         NavMenuItem("step3", "Chart of Accounts", "Core Finance", Icons.Default.AccountTree),
         NavMenuItem("step4", "General Ledger & JEs", "Core Finance", Icons.Default.Book, if (pendingJEs > 0) "$pendingJEs" else null),
         NavMenuItem("step9", "Cash & Bank Management", "Core Finance", Icons.Default.AccountBalance),
@@ -274,7 +275,8 @@ fun MasErpApp(viewModel: MasViewModel = viewModel()) {
                 when (currentRoute) {
                     "step1" -> DashboardScreen(viewModel = viewModel, onNavigateToModule = { currentRoute = it })
                     "step2" -> CompanySetupScreen(viewModel = viewModel)
-                    "step3" -> ChartOfAccountsScreen(viewModel = viewModel)
+                    "parties" -> PartyAccountsScreen(viewModel = viewModel)
+                    "step3" -> ChartOfAccountsScreen(viewModel = viewModel, onNavigateToParties = { currentRoute = "parties" })
                     "step4" -> GeneralLedgerScreen(viewModel = viewModel)
                     "step5" -> CustomersScreen(viewModel = viewModel)
                     "step6" -> SalesScreen(viewModel = viewModel)
@@ -326,7 +328,7 @@ fun DrawerContent(
             Spacer(modifier = Modifier.width(10.dp))
             Column {
                 Text(
-                    text = "MAS ERP",
+                    text = "MAS",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
@@ -347,7 +349,7 @@ fun DrawerContent(
         OutlinedTextField(
             value = searchFilter,
             onValueChange = { searchFilter = it },
-            placeholder = { Text("Filter ERP modules...", fontSize = 12.sp, color = MasRailMuted) },
+            placeholder = { Text("Filter modules...", fontSize = 12.sp, color = MasRailMuted) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MasRailMuted, modifier = Modifier.size(18.dp)) },
             modifier = Modifier
                 .fillMaxWidth()

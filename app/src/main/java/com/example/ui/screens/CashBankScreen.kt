@@ -56,7 +56,7 @@ fun CashBankScreen(viewModel: MasViewModel) {
         }
 
         when (subTab) {
-            "accounts" -> CashBankAccountsList(accounts, txns, cashInHand, bankBalance)
+            "accounts" -> CashBankAccountsList(viewModel, accounts, txns, cashInHand, bankBalance)
             "entry" -> CashBankEntryForm(viewModel, accounts) { subTab = "accounts" }
             "transfer" -> CashBankTransferForm(viewModel, accounts) { subTab = "accounts" }
             "ledger" -> CashBankLedgerView(accounts, txns)
@@ -67,11 +67,53 @@ fun CashBankScreen(viewModel: MasViewModel) {
 
 @Composable
 fun CashBankAccountsList(
+    viewModel: MasViewModel,
     accounts: List<CashBankAccount>,
     txns: List<CashBankTxn>,
     totalCash: Double,
     totalBank: Double
 ) {
+    var editingAccount by remember { mutableStateOf<CashBankAccount?>(null) }
+    var newOpeningInput by remember { mutableStateOf("") }
+
+    if (editingAccount != null) {
+        val acc = editingAccount!!
+        AlertDialog(
+            onDismissRequest = { editingAccount = null },
+            title = { Text("Set Opening Balance", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Account: ${acc.name} (${acc.kind})", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text("Enter initial cash opening balance in hand prior to recorded transactions:", fontSize = 12.sp, color = MasMuted)
+                    OutlinedTextField(
+                        value = newOpeningInput,
+                        onValueChange = { newOpeningInput = it },
+                        label = { Text("Opening Balance (Rs)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val amount = newOpeningInput.toDoubleOrNull() ?: 0.0
+                        viewModel.updateCashBankAccountOpening(acc.id, amount)
+                        editingAccount = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MasGreen)
+                ) {
+                    Text("Save Opening Balance")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingAccount = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 80.dp)
@@ -84,7 +126,14 @@ fun CashBankAccountsList(
         }
 
         item {
-            Text("Cash Accounts", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Cash Accounts", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Tap account to edit opening balance", fontSize = 11.sp, color = MasMuted)
+            }
         }
 
         items(accounts.filter { it.kind == "Cash" }) { acc ->
@@ -95,25 +144,43 @@ fun CashBankAccountsList(
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                shape = RoundedCornerShape(10.dp)
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth().clickable {
+                    editingAccount = acc
+                    newOpeningInput = if (acc.openingBalance > 0) acc.openingBalance.toString() else ""
+                }
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(acc.name, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
-                        Text("${acc.id} · Cash Account", color = MasMuted, fontSize = 11.sp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(acc.name, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(Icons.Default.Edit, contentDescription = "Edit Opening Balance", tint = MasGreen, modifier = Modifier.size(14.dp))
+                        }
+                        Text("Opening: ${formatMoney(acc.openingBalance)} · ${acc.id}", color = MasMuted, fontSize = 11.sp)
                     }
-                    Text(formatMoney(balance), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MasGreen, fontFamily = FontFamily.Monospace)
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(formatMoney(balance), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MasGreen, fontFamily = FontFamily.Monospace)
+                        Text("Current Balance", fontSize = 10.sp, color = MasMuted)
+                    }
                 }
             }
         }
 
         item {
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Bank Accounts", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Bank Accounts", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Tap to edit opening balance", fontSize = 11.sp, color = MasMuted)
+            }
         }
 
         items(accounts.filter { it.kind == "Bank" }) { acc ->
@@ -124,18 +191,29 @@ fun CashBankAccountsList(
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                shape = RoundedCornerShape(10.dp)
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth().clickable {
+                    editingAccount = acc
+                    newOpeningInput = if (acc.openingBalance > 0) acc.openingBalance.toString() else ""
+                }
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(acc.name, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
-                        Text("${acc.bankName ?: ""} · ${acc.accountNumber ?: ""}", color = MasMuted, fontSize = 11.sp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(acc.name, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(Icons.Default.Edit, contentDescription = "Edit Opening Balance", tint = MasBlue, modifier = Modifier.size(14.dp))
+                        }
+                        Text("Opening: ${formatMoney(acc.openingBalance)} · ${acc.bankName ?: ""}", color = MasMuted, fontSize = 11.sp)
                     }
-                    Text(formatMoney(balance), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MasBlue, fontFamily = FontFamily.Monospace)
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(formatMoney(balance), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MasBlue, fontFamily = FontFamily.Monospace)
+                        Text("Current Balance", fontSize = 10.sp, color = MasMuted)
+                    }
                 }
             }
         }

@@ -113,6 +113,181 @@ object MasRepository {
         "2026-05" to "Open", "2026-06" to "Open", "2026-07" to "Open", "2026-08" to "Open"
     ))
     val isFiscalYearClosed = MutableStateFlow(false)
+    val partyAccounts = MutableStateFlow(emptyList<PartyAccount>())
+
+    fun getNextPartyCode(type: PartyAccountType): String {
+        val existingCodes = partyAccounts.value.map { it.code.trim().uppercase() }.toSet()
+        var maxNum = 0
+        partyAccounts.value.filter { it.accountType == type }.forEach { acc ->
+            val code = acc.code.trim()
+            if (code.startsWith(type.codePrefix, ignoreCase = true)) {
+                val numPart = code.removePrefix(type.codePrefix).trim('-', '_', ' ')
+                numPart.toIntOrNull()?.let { num ->
+                    if (num > maxNum) maxNum = num
+                }
+            }
+        }
+        var nextNum = maxNum + 1
+        var candidate = String.format("%s-%03d", type.codePrefix, nextNum)
+        while (existingCodes.contains(candidate.uppercase())) {
+            nextNum++
+            candidate = String.format("%s-%03d", type.codePrefix, nextNum)
+        }
+        return candidate
+    }
+
+    fun savePartyAccount(account: PartyAccount, updateExisting: Boolean = false): Boolean {
+        val currentList = partyAccounts.value
+        val existingIndex = currentList.indexOfFirst {
+            it.id == account.id || it.code.equals(account.code, ignoreCase = true) || (it.name.equals(account.name, ignoreCase = true) && it.accountType == account.accountType)
+        }
+
+        if (existingIndex >= 0) {
+            if (updateExisting) {
+                val updated = currentList.toMutableList()
+                updated[existingIndex] = account
+                partyAccounts.value = updated
+                syncPartyToSubsystems(account)
+                logAudit("Parties", "Update", account.code, "Updated party ${account.name} (${account.accountType.displayName})")
+                return true
+            } else {
+                return false
+            }
+        } else {
+            partyAccounts.value = partyAccounts.value + account
+            syncPartyToSubsystems(account)
+            logAudit("Parties", "Create", account.code, "Created party ${account.name} (${account.accountType.displayName})")
+            return true
+        }
+    }
+
+    fun deletePartyAccount(id: String) {
+        val acc = partyAccounts.value.find { it.id == id }
+        if (acc != null) {
+            partyAccounts.value = partyAccounts.value.filter { it.id != id }
+            logAudit("Parties", "Delete", acc.code, "Deleted party ${acc.name}")
+        }
+    }
+
+    fun importPartyAccounts(rows: List<ImportedAccountRow>, duplicateStrategy: DuplicateStrategy): Pair<Int, Int> {
+        var importedCount = 0
+        var updatedCount = 0
+        val currentList = partyAccounts.value.toMutableList()
+
+        rows.forEach { row ->
+            val type = row.resolvedType ?: return@forEach
+            val code = if (row.assignedCode.isNotBlank()) row.assignedCode else getNextPartyCode(type)
+            val name = row.name.trim()
+            if (name.isBlank()) return@forEach
+
+            val existingIndex = currentList.indexOfFirst { existing ->
+                existing.code.equals(code, ignoreCase = true) ||
+                (existing.name.equals(name, ignoreCase = true) && existing.accountType == type) ||
+                (row.phone.isNotBlank() && existing.phone.isNotBlank() && existing.phone == row.phone && existing.accountType == type)
+            }
+
+            val party = PartyAccount(
+                id = if (existingIndex >= 0) currentList[existingIndex].id else "PTY-${System.currentTimeMillis() % 1000000}-$importedCount",
+                code = code,
+                name = name,
+                accountType = type,
+                openingBalance = row.openingBalance,
+                balanceType = row.balanceType,
+                phone = row.phone,
+                address = row.address,
+                notes = row.notes
+            )
+
+            if (existingIndex >= 0) {
+                if (duplicateStrategy == DuplicateStrategy.UpdateExisting) {
+                    currentList[existingIndex] = party
+                    syncPartyToSubsystems(party)
+                    updatedCount++
+                }
+            } else {
+                currentList.add(party)
+                syncPartyToSubsystems(party)
+                importedCount++
+            }
+        }
+
+        partyAccounts.value = currentList
+        logAudit("Parties", "Import", "EXCEL/CSV", "Imported $importedCount new, updated $updatedCount parties")
+        return Pair(importedCount, updatedCount)
+    }
+
+    private fun syncPartyToSubsystems(party: PartyAccount) {
+        // 1. If Customer, sync to customers list
+        if (party.accountType == PartyAccountType.Customer) {
+            val signedOpening = if (party.balanceType == "Debit") party.openingBalance else -party.openingBalance
+            val existingCust = customers.value.find { it.id == party.code || it.name.equals(party.name, ignoreCase = true) }
+            if (existingCust != null) {
+                customers.value = customers.value.map {
+                    if (it.id == existingCust.id) it.copy(
+                        name = party.name,
+                        phone = party.phone,
+                        address = party.address,
+                        openingBalance = signedOpening
+                    ) else it
+                }
+            } else {
+                customers.value = customers.value + Customer(
+                    id = party.code,
+                    name = party.name,
+                    phone = party.phone,
+                    address = party.address,
+                    openingBalance = signedOpening
+                )
+            }
+        }
+
+        // 2. If Cash In Hand, sync to cashBankAccounts
+        if (party.accountType == PartyAccountType.CashInHand) {
+            val existingCash = cashBankAccounts.value.find { it.id == party.code || it.name.equals(party.name, ignoreCase = true) }
+            if (existingCash != null) {
+                cashBankAccounts.value = cashBankAccounts.value.map {
+                    if (it.id == existingCash.id) it.copy(
+                        name = party.name,
+                        openingBalance = party.openingBalance
+                    ) else it
+                }
+            } else {
+                cashBankAccounts.value = cashBankAccounts.value + CashBankAccount(
+                    id = party.code,
+                    name = party.name,
+                    kind = "Cash",
+                    openingBalance = party.openingBalance
+                )
+            }
+        }
+
+        // 3. Sync to General Ledger Chart of Accounts
+        val glAccName = "${party.name} (${party.accountType.codePrefix})"
+        val existingGl = accounts.value.find { it.code == party.code || it.name.equals(glAccName, ignoreCase = true) }
+        if (existingGl != null) {
+            accounts.value = accounts.value.map {
+                if (it.id == existingGl.id) it.copy(
+                    code = party.code,
+                    name = glAccName,
+                    type = party.accountType.defaultGlType,
+                    category = party.accountType.defaultCategory,
+                    opening = party.openingBalance,
+                    nature = party.balanceType
+                ) else it
+            }
+        } else {
+            accounts.value = accounts.value + Account(
+                id = "GL-${party.code}",
+                code = party.code,
+                name = glAccName,
+                type = party.accountType.defaultGlType,
+                category = party.accountType.defaultCategory,
+                opening = party.openingBalance,
+                nature = party.balanceType,
+                system = false
+            )
+        }
+    }
 
     // Helper: double-entry posting engine
     fun postJournalEntry(entry: JournalEntry): Pair<Boolean, String> {
