@@ -454,3 +454,49 @@ data class CompanyProfile(
     val billPrefix: String = "BILL-",
     val billStart: Int = 1001
 )
+
+// ============================================================================
+// Double-Entry Ledger & Factory Stock Models
+// ============================================================================
+
+data class AccountLedgerBalance(
+    val accountCode: String,
+    val accountName: String,
+    val accountType: String,
+    val normalNature: String = "Debit", // Debit or Credit
+    val openingBalance: Double = 0.0,
+    val totalDebit: Double = 0.0,
+    val totalCredit: Double = 0.0,
+    val currentBalance: Double = 0.0,
+    val drCrIndicator: String = "Dr" // "Dr" or "Cr"
+)
+
+data class FactoryItemStock(
+    val itemId: String,
+    val itemName: String,
+    val sku: String,
+    val unit: String,
+    val costPrice: Double,
+    val quantity: Double,
+    val totalValue: Double,
+    val stockIn: Double = 0.0,
+    val stockOut: Double = 0.0
+)
+
+data class FactoryStockRecord(
+    val factoryId: String,
+    val factoryName: String,
+    val factoryCode: String,
+    val totalQuantity: Double,
+    val totalValue: Double,
+    val items: List<FactoryItemStock>
+)
+
+data class DoubleEntryIntegrityCheck(
+    val isBalanced: Boolean,
+    val totalDebits: Double,
+    val totalCredits: Double,
+    val difference: Double,
+    val imbalancedEntries: List<JournalEntry> = emptyList()
+)
+

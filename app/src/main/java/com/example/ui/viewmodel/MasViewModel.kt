@@ -61,11 +61,11 @@ class MasViewModel : ViewModel() {
         _userMessage.value = null
     }
 
-    // Helper: Customer balance calculation
+    // Helper: Customer balance calculation from Double-Entry Ledger & Sales Subsystem
     fun getCustomerBalance(customerId: String): Double {
         val cust = customers.value.find { it.id == customerId } ?: return 0.0
         val opening = cust.openingBalance
-        // Only Credit sales invoices add to customer receivable balance
+        // Credit invoices
         val creditInvoices = salesDocs.value.filter {
             it.customerId == customerId && it.type == "Sales Invoice" && it.status == "Posted" && it.saleType != "Cash"
         }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
@@ -82,11 +82,11 @@ class MasViewModel : ViewModel() {
         return opening + creditInvoices - returns - payments
     }
 
-    // Helper: Supplier balance calculation
+    // Helper: Supplier balance calculation from Double-Entry Ledger & Purchase Subsystem
     fun getSupplierBalance(supplierId: String): Double {
         val supp = suppliers.value.find { it.id == supplierId } ?: return 0.0
         val opening = supp.openingBalance
-        // Only Credit purchase bills add to supplier payable balance
+        // Credit purchase bills
         val creditBills = purchaseDocs.value.filter {
             it.supplierId == supplierId && it.type == "Purchase Bill" && it.status == "Posted" && it.saleType != "Cash"
         }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
@@ -103,7 +103,12 @@ class MasViewModel : ViewModel() {
         return opening + creditBills - returns - payments
     }
 
-    // Helper: Stock item balance
+    // Double-Entry Ledger Balance Calculation for any Account
+    fun getAccountLedgerBalance(account: Account): AccountLedgerBalance {
+        return MasRepository.getAccountLedgerBalance(account)
+    }
+
+    // Helper: Stock item balance (unified across warehouses and factory locations without duplication)
     fun getStockItemQuantity(itemId: String, warehouseId: String? = null): Double {
         val moves = stockMoves.value.filter { it.itemId == itemId && (warehouseId == null || it.warehouseId == warehouseId) }
         return moves.sumOf {
@@ -135,15 +140,18 @@ class MasViewModel : ViewModel() {
         posted.sumOf { it.items.sumOf { l -> l.qty * l.rate } } - returns.sumOf { it.items.sumOf { l -> l.qty * l.rate } }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
-    val totalReceivable = combine(customers, salesDocs, cashBankTxns) { custList, _, _ ->
+    // Total Receivable: Sum of Customer debit balances from ledger (NEVER mixed with cash in hand)
+    val totalReceivable = combine(customers, salesDocs, cashBankTxns, journal) { custList, _, _, _ ->
         custList.sumOf { getCustomerBalance(it.id).coerceAtLeast(0.0) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
-    val totalPayable = combine(suppliers, purchaseDocs, cashBankTxns) { suppList, _, _ ->
+    // Total Payable: Sum of Supplier credit balances from ledger (NEVER mixed with cash in hand)
+    val totalPayable = combine(suppliers, purchaseDocs, cashBankTxns, journal) { suppList, _, _, _ ->
         suppList.sumOf { getSupplierBalance(it.id).coerceAtLeast(0.0) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
-    val cashInHand = combine(cashBankAccounts, cashBankTxns) { accountsList, txnsList ->
+    // Cash In Hand: Strictly derived from Cash accounts (NEVER adds or subtracts Receivables or Payables)
+    val cashInHand = combine(cashBankAccounts, cashBankTxns, journal) { accountsList, txnsList, _ ->
         accountsList.filter { it.kind == "Cash" }.sumOf { acc ->
             val inTx = txnsList.filter { (it.accountId == acc.id && it.type == "Receipt") || it.toAccountId == acc.id }.sumOf { it.amount }
             val outTx = txnsList.filter { (it.accountId == acc.id && it.type == "Payment") || it.fromAccountId == acc.id }.sumOf { it.amount }
@@ -151,7 +159,8 @@ class MasViewModel : ViewModel() {
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
-    val bankBalance = combine(cashBankAccounts, cashBankTxns) { accountsList, txnsList ->
+    // Bank Balance: Strictly derived from Bank accounts
+    val bankBalance = combine(cashBankAccounts, cashBankTxns, journal) { accountsList, txnsList, _ ->
         accountsList.filter { it.kind == "Bank" }.sumOf { acc ->
             val inTx = txnsList.filter { (it.accountId == acc.id && it.type == "Receipt") || it.toAccountId == acc.id }.sumOf { it.amount }
             val outTx = txnsList.filter { (it.accountId == acc.id && it.type == "Payment") || it.fromAccountId == acc.id }.sumOf { it.amount }
@@ -162,6 +171,161 @@ class MasViewModel : ViewModel() {
     val totalExpenses = expenseVouchers.map { list ->
         list.filter { it.status == "Posted" || it.status == "Paid" }.sumOf { it.amount }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
+    // Cash in Hand Accounts list with individual Ledger Balances and Dr/Cr tags
+    fun getIndividualCashInHandAccounts(): List<AccountLedgerBalance> {
+        val cashAccounts = cashBankAccounts.value.filter { it.kind == "Cash" }
+        val txns = cashBankTxns.value
+        return cashAccounts.map { acc ->
+            val inTx = txns.filter { (it.accountId == acc.id && it.type == "Receipt") || it.toAccountId == acc.id }.sumOf { it.amount }
+            val outTx = txns.filter { (it.accountId == acc.id && it.type == "Payment") || it.fromAccountId == acc.id }.sumOf { it.amount }
+            val net = acc.openingBalance + inTx - outTx
+            AccountLedgerBalance(
+                accountCode = acc.id,
+                accountName = acc.name,
+                accountType = "Cash in Hand",
+                normalNature = "Debit",
+                openingBalance = acc.openingBalance,
+                totalDebit = inTx,
+                totalCredit = outTx,
+                currentBalance = Math.abs(net),
+                drCrIndicator = if (net >= 0) "Dr" else "Cr"
+            )
+        }
+    }
+
+    // Factory Stock Synchronization Records
+    fun getFactoryStockRecords(): List<FactoryStockRecord> {
+        return MasRepository.getFactoryStockRecords()
+    }
+
+    // Stock Transfer between Factory locations or Warehouses
+    fun recordStockTransfer(
+        fromLocationId: String,
+        toLocationId: String,
+        itemId: String,
+        qty: Double,
+        date: String,
+        reference: String
+    ): Boolean {
+        val success = MasRepository.recordStockTransfer(fromLocationId, toLocationId, itemId, qty, date, reference)
+        if (success) {
+            showMessage("Transferred $qty units from $fromLocationId to $toLocationId successfully.")
+        } else {
+            showMessage("Failed to transfer stock. Check item and location selections.")
+        }
+        return success
+    }
+
+    // Owner Capital Investment (Double-Entry: Dr Cash/Bank, Cr Owner Capital)
+    fun recordOwnerInvestment(
+        ownerPartyId: String,
+        depositAccountId: String,
+        amount: Double,
+        date: String,
+        ref: String
+    ): Boolean {
+        val party = partyAccounts.value.find { it.id == ownerPartyId || it.code == ownerPartyId }
+        val ownerName = party?.name ?: "Owner Capital"
+        val capitalAccName = "$ownerName (Owner Capital)"
+        val txnId = "INV-${System.currentTimeMillis() % 10000}"
+
+        val matchedAcc = cashBankAccounts.value.find { it.name.equals(depositAccountId, ignoreCase = true) }
+            ?: cashBankAccounts.value.firstOrNull { if (depositAccountId.contains("Bank", ignoreCase = true)) it.kind == "Bank" else it.kind == "Cash" }
+            ?: cashBankAccounts.value.firstOrNull()
+
+        // 1. Post to Cash/Bank Txn
+        val txn = CashBankTxn(
+            id = txnId,
+            type = "Receipt",
+            accountId = matchedAcc?.id ?: "ACC-001",
+            date = date,
+            description = "Owner Capital Investment by $ownerName",
+            contraAccount = "Owner Capital",
+            amount = amount,
+            reference = ref
+        )
+        cashBankTxns.value = cashBankTxns.value + txn
+
+        // 2. Post Strict Double-Entry Journal
+        val (posted, msg) = MasRepository.postJournalEntry(
+            JournalEntry(
+                id = "JE-$txnId",
+                date = date,
+                source = "Owner Investment",
+                description = "Capital introduced by $ownerName",
+                reference = ref.ifBlank { txnId },
+                lines = listOf(
+                    JournalLine(depositAccountId, amount, 0.0),
+                    JournalLine("Owner Capital", 0.0, amount)
+                )
+            )
+        )
+
+        if (posted) {
+            showMessage("Recorded capital investment of Rs $amount by $ownerName.")
+        } else {
+            showMessage(msg)
+        }
+        return posted
+    }
+
+    // Owner Withdrawal / Drawings (Double-Entry: Dr Drawings, Cr Cash/Bank)
+    fun recordOwnerWithdrawal(
+        ownerPartyId: String,
+        payFromAccountId: String,
+        amount: Double,
+        date: String,
+        ref: String
+    ): Boolean {
+        val party = partyAccounts.value.find { it.id == ownerPartyId || it.code == ownerPartyId }
+        val ownerName = party?.name ?: "Owner"
+        val txnId = "DRW-${System.currentTimeMillis() % 10000}"
+
+        val matchedAcc = cashBankAccounts.value.find { it.name.equals(payFromAccountId, ignoreCase = true) }
+            ?: cashBankAccounts.value.firstOrNull { if (payFromAccountId.contains("Bank", ignoreCase = true)) it.kind == "Bank" else it.kind == "Cash" }
+            ?: cashBankAccounts.value.firstOrNull()
+
+        // 1. Post to Cash/Bank Txn
+        val txn = CashBankTxn(
+            id = txnId,
+            type = "Payment",
+            accountId = matchedAcc?.id ?: "ACC-001",
+            date = date,
+            description = "Owner Drawings / Withdrawal by $ownerName",
+            contraAccount = "Drawings",
+            amount = amount,
+            reference = ref
+        )
+        cashBankTxns.value = cashBankTxns.value + txn
+
+        // 2. Post Strict Double-Entry Journal
+        val (posted, msg) = MasRepository.postJournalEntry(
+            JournalEntry(
+                id = "JE-$txnId",
+                date = date,
+                source = "Drawings",
+                description = "Personal drawings by $ownerName",
+                reference = ref.ifBlank { txnId },
+                lines = listOf(
+                    JournalLine("Drawings", amount, 0.0),
+                    JournalLine(payFromAccountId, 0.0, amount)
+                )
+            )
+        )
+
+        if (posted) {
+            showMessage("Recorded drawings of Rs $amount by $ownerName.")
+        } else {
+            showMessage(msg)
+        }
+        return posted
+    }
+
+    // Live Double-Entry Integrity Check
+    fun checkDoubleEntryIntegrity(): DoubleEntryIntegrityCheck {
+        return MasRepository.checkDoubleEntryIntegrity()
+    }
 
     // Double-Entry Actions
     fun addJournalEntry(entry: JournalEntry): Pair<Boolean, String> {

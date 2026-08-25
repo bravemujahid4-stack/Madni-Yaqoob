@@ -261,7 +261,26 @@ object MasRepository {
             }
         }
 
-        // 3. Sync to General Ledger Chart of Accounts
+        // 4. If Factory, sync to Warehouses / Locations for inventory tracking
+        if (party.accountType == PartyAccountType.Factory) {
+            val existingWh = warehouses.value.find { it.id == party.code || it.name.equals(party.name, ignoreCase = true) }
+            if (existingWh != null) {
+                warehouses.value = warehouses.value.map {
+                    if (it.id == existingWh.id) it.copy(
+                        name = party.name,
+                        location = "Factory: ${party.address.ifBlank { "Factory Location" }}"
+                    ) else it
+                }
+            } else {
+                warehouses.value = warehouses.value + Warehouse(
+                    id = party.code,
+                    name = party.name,
+                    location = "Factory: ${party.address.ifBlank { "Factory Location" }}"
+                )
+            }
+        }
+
+        // 5. Sync to General Ledger Chart of Accounts
         val glAccName = "${party.name} (${party.accountType.codePrefix})"
         val existingGl = accounts.value.find { it.code == party.code || it.name.equals(glAccName, ignoreCase = true) }
         if (existingGl != null) {
@@ -292,15 +311,196 @@ object MasRepository {
     // Helper: double-entry posting engine
     fun postJournalEntry(entry: JournalEntry): Pair<Boolean, String> {
         val lines = entry.lines
-        if (lines.size < 2) return Pair(false, "A journal entry needs at least two lines.")
+        if (lines.size < 2) return Pair(false, "A double-entry journal requires at least two lines.")
         val totalDebit = Math.round(lines.sumOf { it.debit } * 100.0) / 100.0
         val totalCredit = Math.round(lines.sumOf { it.credit } * 100.0) / 100.0
-        if (totalDebit <= 0.0 || Math.abs(totalDebit - totalCredit) > 0.004) {
-            return Pair(false, "Entry is not balanced: Debit $totalDebit vs Credit $totalCredit.")
+        if (totalDebit <= 0.0) {
+            return Pair(false, "Transaction amount must be greater than zero.")
+        }
+        if (Math.abs(totalDebit - totalCredit) > 0.005) {
+            return Pair(false, "Unbalanced double-entry: Total Debit ($totalDebit) ≠ Total Credit ($totalCredit).")
         }
         journal.value = journal.value + entry
-        logAudit(entry.source, "Post", entry.id, entry.description)
-        return Pair(true, "Posted successfully.")
+        logAudit(entry.source, "Post", entry.id, "${entry.description} (Dr $totalDebit = Cr $totalCredit)")
+        return Pair(true, "Journal entry ${entry.id} posted successfully.")
+    }
+
+    fun voidJournalEntry(id: String): Boolean {
+        val entry = journal.value.find { it.id == id } ?: return false
+        journal.value = journal.value.map {
+            if (it.id == id) it.copy(status = "Voided") else it
+        }
+        logAudit("General Ledger", "Void", id, "Voided journal entry ${entry.description}")
+        return true
+    }
+
+    fun deleteJournalEntry(id: String): Boolean {
+        val entry = journal.value.find { it.id == id } ?: return false
+        journal.value = journal.value.filter { it.id != id }
+        logAudit("General Ledger", "Delete", id, "Deleted journal entry ${entry.description}")
+        return true
+    }
+
+    // Calculate strict double-entry ledger balance for any account
+    fun getAccountLedgerBalance(account: Account): AccountLedgerBalance {
+        val activeEntries = journal.value.filter { it.status == "Posted" }
+        var totalDr = 0.0
+        var totalCr = 0.0
+
+        activeEntries.forEach { entry ->
+            entry.lines.forEach { line ->
+                if (matchesAccount(line.account, account)) {
+                    totalDr += line.debit
+                    totalCr += line.credit
+                }
+            }
+        }
+
+        val opening = account.opening
+        val isNormalDebit = account.nature.equals("Debit", ignoreCase = true)
+
+        val netAmount = if (isNormalDebit) {
+            opening + totalDr - totalCr
+        } else {
+            opening + totalCr - totalDr
+        }
+
+        val indicator = if (isNormalDebit) {
+            if (netAmount >= 0) "Dr" else "Cr"
+        } else {
+            if (netAmount >= 0) "Cr" else "Dr"
+        }
+
+        return AccountLedgerBalance(
+            accountCode = account.code,
+            accountName = account.name,
+            accountType = account.type.name,
+            normalNature = account.nature,
+            openingBalance = opening,
+            totalDebit = totalDr,
+            totalCredit = totalCr,
+            currentBalance = Math.abs(netAmount),
+            drCrIndicator = indicator
+        )
+    }
+
+    private fun matchesAccount(lineAccount: String, account: Account): Boolean {
+        if (lineAccount.equals(account.name, ignoreCase = true)) return true
+        if (lineAccount.equals(account.code, ignoreCase = true)) return true
+        if (lineAccount.startsWith("${account.name} (", ignoreCase = true)) return true
+        if (lineAccount.contains(account.code, ignoreCase = true)) return true
+        return false
+    }
+
+    // Double-Entry Integrity Check across all posted entries
+    fun checkDoubleEntryIntegrity(): DoubleEntryIntegrityCheck {
+        val postedEntries = journal.value.filter { it.status == "Posted" }
+        var sumDebits = 0.0
+        var sumCredits = 0.0
+        val imbalanced = mutableListOf<JournalEntry>()
+
+        postedEntries.forEach { entry ->
+            val entryDr = entry.lines.sumOf { it.debit }
+            val entryCr = entry.lines.sumOf { it.credit }
+            sumDebits += entryDr
+            sumCredits += entryCr
+            if (Math.abs(entryDr - entryCr) > 0.005) {
+                imbalanced.add(entry)
+            }
+        }
+
+        val diff = Math.abs(sumDebits - sumCredits)
+        return DoubleEntryIntegrityCheck(
+            isBalanced = diff <= 0.01 && imbalanced.isEmpty(),
+            totalDebits = sumDebits,
+            totalCredits = sumCredits,
+            difference = diff,
+            imbalancedEntries = imbalanced
+        )
+    }
+
+    // Stock Transfer between any two locations (Factory / Warehouse)
+    fun recordStockTransfer(
+        fromLocationId: String,
+        toLocationId: String,
+        itemId: String,
+        qty: Double,
+        date: String,
+        reference: String
+    ): Boolean {
+        if (qty <= 0 || fromLocationId == toLocationId) return false
+        val item = stockItems.value.find { it.id == itemId } ?: return false
+        val unitCost = item.costPrice
+        val transferId = "TRF-${System.currentTimeMillis() % 100000}"
+
+        val moveOut = StockMove(
+            id = "MV-OUT-$transferId",
+            date = date,
+            itemId = itemId,
+            warehouseId = fromLocationId,
+            type = "Transfer Out",
+            qty = qty,
+            unitCost = unitCost,
+            reference = "Transfer to $toLocationId ($reference)"
+        )
+
+        val moveIn = StockMove(
+            id = "MV-IN-$transferId",
+            date = date,
+            itemId = itemId,
+            warehouseId = toLocationId,
+            type = "Transfer In",
+            qty = qty,
+            unitCost = unitCost,
+            reference = "Transfer from $fromLocationId ($reference)"
+        )
+
+        stockMoves.value = stockMoves.value + listOf(moveOut, moveIn)
+        logAudit("Inventory", "Transfer", transferId, "Transferred $qty ${item.unit} of ${item.name} from $fromLocationId to $toLocationId")
+        return true
+    }
+
+    // Factory Stock Synchronization
+    fun getFactoryStockRecords(): List<FactoryStockRecord> {
+        val factoryParties = partyAccounts.value.filter { it.accountType == PartyAccountType.Factory }
+        val allItems = stockItems.value
+        val moves = stockMoves.value
+
+        return factoryParties.map { factory ->
+            val factoryLocIds = setOf(factory.code, factory.name, factory.id)
+            val itemStocks = allItems.mapNotNull { item ->
+                val factoryMoves = moves.filter { it.itemId == item.id && it.warehouseId in factoryLocIds }
+                val stockIn = factoryMoves.filter { it.type in listOf("In", "Opening", "Transfer In", "Adjustment +") }.sumOf { it.qty }
+                val stockOut = factoryMoves.filter { it.type in listOf("Out", "Transfer Out", "Adjustment -") }.sumOf { it.qty }
+                val currentQty = stockIn - stockOut
+
+                if (currentQty != 0.0 || stockIn > 0.0 || stockOut > 0.0) {
+                    FactoryItemStock(
+                        itemId = item.id,
+                        itemName = item.name,
+                        sku = item.sku,
+                        unit = item.unit,
+                        costPrice = item.costPrice,
+                        quantity = currentQty,
+                        totalValue = currentQty * item.costPrice,
+                        stockIn = stockIn,
+                        stockOut = stockOut
+                    )
+                } else null
+            }
+
+            val totalQty = itemStocks.sumOf { it.quantity }
+            val totalVal = itemStocks.sumOf { it.totalValue }
+
+            FactoryStockRecord(
+                factoryId = factory.id,
+                factoryName = factory.name,
+                factoryCode = factory.code,
+                totalQuantity = totalQty,
+                totalValue = totalVal,
+                items = itemStocks
+            )
+        }
     }
 
     fun logAudit(module: String, action: String, txnId: String, details: String) {

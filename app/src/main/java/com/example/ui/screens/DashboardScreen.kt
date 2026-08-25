@@ -50,6 +50,7 @@ fun DashboardScreen(
     val customers by viewModel.customers.collectAsState()
     val suppliers by viewModel.suppliers.collectAsState()
     val auditLog by viewModel.auditLog.collectAsState()
+    val journal by viewModel.journal.collectAsState()
 
     // Quick action dialog states
     var showQuickSaleDialog by remember { mutableStateOf(false) }
@@ -112,7 +113,61 @@ fun DashboardScreen(
             }
         }
 
-        // 9 KPI Metrics Cards (Adaptive Grid)
+        // Double-Entry Integrity Badge
+        item {
+            val integrity = remember(journal) { viewModel.checkDoubleEntryIntegrity() }
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (integrity.isBalanced) MasGreenSoft else MasRedLight
+                ),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, if (integrity.isBalanced) MasGreen else MasRed),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (integrity.isBalanced) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = "Integrity",
+                            tint = if (integrity.isBalanced) MasGreen else MasRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = if (integrity.isBalanced) "Double-Entry Ledger Balanced" else "Ledger Out of Balance",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = if (integrity.isBalanced) MasGreen else MasRed
+                            )
+                            Text(
+                                text = "Total Dr ${formatMoney(integrity.totalDebits)} = Total Cr ${formatMoney(integrity.totalCredits)}",
+                                fontSize = 10.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Surface(
+                        color = if (integrity.isBalanced) MasGreen else MasRed,
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = if (integrity.isBalanced) "STRICT Dr=Cr" else "UNBALANCED",
+                            color = Color.White,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 8 Key Financial Indicators
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -122,7 +177,7 @@ fun DashboardScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     letterSpacing = 0.5.sp
                 )
-                // Row 1
+                // Row 1: Sales & Purchases
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatCard(
                         label = "Total Sales",
@@ -141,45 +196,45 @@ fun DashboardScreen(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                // Row 2
+                // Row 2: Total Receivable & Total Payable (Ledger-based)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatCard(
-                        label = "Receivables",
-                        value = formatMoney(totalReceivable),
+                        label = "Total Receivable",
+                        value = "${formatMoney(totalReceivable)} Dr",
                         icon = Icons.Default.AccountBalanceWallet,
                         tone = MasGreen,
-                        sub = "Customer due",
+                        sub = "Customer due (Dr)",
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
-                        label = "Payables",
-                        value = formatMoney(totalPayable),
+                        label = "Total Payable",
+                        value = "${formatMoney(totalPayable)} Cr",
                         icon = Icons.Default.Payments,
                         tone = MasRed,
-                        sub = "Supplier owed",
+                        sub = "Supplier owed (Cr)",
                         modifier = Modifier.weight(1f)
                     )
                 }
-                // Row 3
+                // Row 3: Cash in Hand & Bank Balance
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatCard(
                         label = "Cash in Hand",
-                        value = formatMoney(cashInHand),
+                        value = "${formatMoney(cashInHand)} Dr",
                         icon = Icons.Default.Money,
                         tone = MasInkLight,
-                        sub = "Drawers & petty",
+                        sub = "Physical drawers only",
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
                         label = "Bank Balance",
-                        value = formatMoney(bankBalance),
+                        value = "${formatMoney(bankBalance)} Dr",
                         icon = Icons.Default.AccountBalance,
                         tone = MasBlue,
                         sub = "Operating banks",
                         modifier = Modifier.weight(1f)
                     )
                 }
-                // Row 4
+                // Row 4: Net Profit & Stock Inventory Value
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatCard(
                         label = "Net Profit",
@@ -190,13 +245,193 @@ fun DashboardScreen(
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
-                        label = "Stock Value",
+                        label = "Inventory Value",
                         value = formatMoney(totalStockValue),
                         icon = Icons.Default.Inventory2,
                         tone = MasInkLight,
-                        sub = "At cost price",
+                        sub = "At cost (all locations)",
                         modifier = Modifier.weight(1f)
                     )
+                }
+            }
+        }
+
+        // Dedicated Cash in Hand Breakdown Card
+        item {
+            val individualCashAccounts = remember(cashInHand, viewModel.cashBankAccounts) {
+                viewModel.getIndividualCashInHandAccounts()
+            }
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AttachMoney, contentDescription = "Cash In Hand", tint = MasGreen, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Cash in Hand Breakdown",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp
+                            )
+                        }
+                        Surface(
+                            color = MasGreenSoft,
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "Total: ${formatMoney(cashInHand)} Dr",
+                                color = MasGreen,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Physical cash accounts strictly separated from Receivables and Payables",
+                        fontSize = 10.5.sp,
+                        color = MasMuted
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (individualCashAccounts.isEmpty()) {
+                        Text("No cash in hand accounts configured.", fontSize = 12.sp, color = MasMuted)
+                    } else {
+                        individualCashAccounts.forEach { acc ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 5.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(acc.accountName, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
+                                    Text(
+                                        "Opening: ${formatMoney(acc.openingBalance)} · Dr: ${formatMoney(acc.totalDebit)} · Cr: ${formatMoney(acc.totalCredit)}",
+                                        color = MasMuted,
+                                        fontSize = 10.5.sp
+                                    )
+                                }
+                                Surface(
+                                    color = if (acc.drCrIndicator == "Dr") MasGreenSoft else MasRedLight,
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "${formatMoney(acc.currentBalance)} ${acc.drCrIndicator}",
+                                        color = if (acc.drCrIndicator == "Dr") MasGreen else MasRed,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Factory Stock & Inventory Locations Card
+        item {
+            val factoryRecords = remember(viewModel.stockMoves, viewModel.stockItems, viewModel.partyAccounts) {
+                viewModel.getFactoryStockRecords()
+            }
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.PrecisionManufacturing, contentDescription = "Factory Stock", tint = MasAmber, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Factory Stock & Locations",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp
+                            )
+                        }
+                        TextButton(onClick = { onNavigateToModule("step9") }) {
+                            Text("Inventory", color = MasRed, fontSize = 11.sp)
+                        }
+                    }
+                    Text(
+                        text = "Synchronized with inventory stock ledger without valuation duplication",
+                        fontSize = 10.5.sp,
+                        color = MasMuted
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (factoryRecords.isEmpty()) {
+                        Text("No factory locations with stock found. Add a Factory account in Party Accounts.", fontSize = 11.5.sp, color = MasMuted)
+                    } else {
+                        factoryRecords.forEach { fRec ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(fRec.factoryName, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                                        Text("Code: ${fRec.factoryCode} · ${fRec.items.size} item(s)", color = MasMuted, fontSize = 10.5.sp)
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            formatMoney(fRec.totalValue),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.5.sp,
+                                            color = MasAmber,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Text("${fRec.totalQuantity.toInt()} units total", fontSize = 10.sp, color = MasMuted)
+                                    }
+                                }
+                                if (fRec.items.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        fRec.items.take(3).forEach { itm ->
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "${itm.itemName}: ${itm.quantity.toInt()} ${itm.unit}",
+                                                    fontSize = 10.sp,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                        }
+                    }
                 }
             }
         }
