@@ -15,32 +15,33 @@ object MasRepository {
 
     // Clean initial Chart of Accounts with zero opening balances
     private val defaultAccounts = listOf(
-        Account("1", "1010", "Cash in Hand", AccountType.Assets, "Cash in Hand", opening = 0.0, system = true),
-        Account("2", "1020", "Bank", AccountType.Assets, "Bank", opening = 0.0, system = true),
-        Account("3", "1030", "Accounts Receivable", AccountType.Assets, "Accounts Receivable", opening = 0.0, system = true),
-        Account("4", "1040", "Inventory", AccountType.Assets, "Inventory", opening = 0.0, system = true),
-        Account("5", "1050", "Fixed Assets", AccountType.Assets, "Fixed Assets", opening = 0.0, system = true),
-        Account("6", "1055", "Accumulated Depreciation", AccountType.Assets, "Accumulated Depreciation", opening = 0.0, nature = "Credit", system = true),
-        Account("7", "2010", "Accounts Payable", AccountType.Liabilities, "Accounts Payable", opening = 0.0, system = true),
-        Account("8", "2020", "Loans", AccountType.Liabilities, "Loans", opening = 0.0, system = true),
-        Account("9", "2030", "Accrued Expenses", AccountType.Liabilities, "Accrued Expenses", opening = 0.0, system = true),
-        Account("10", "2035", "Expenses Payable", AccountType.Liabilities, "Expenses Payable", opening = 0.0, system = true),
-        Account("11", "3010", "Owner Capital", AccountType.Equity, "Owner Capital", opening = 0.0, system = true),
-        Account("12", "3020", "Retained Earnings", AccountType.Equity, "Retained Earnings", opening = 0.0, system = true),
-        Account("13", "3030", "Drawings", AccountType.Equity, "Drawings", opening = 0.0, nature = "Debit", system = true),
-        Account("14", "4010", "Sales Revenue", AccountType.Revenue, "Sales Revenue", opening = 0.0, system = true),
-        Account("15", "4020", "Service Revenue", AccountType.Revenue, "Service Revenue", opening = 0.0, system = true),
-        Account("16", "4090", "Other Income", AccountType.Revenue, "Other Income", opening = 0.0, system = true),
-        Account("17", "5005", "Purchases", AccountType.Expenses, "Purchases", opening = 0.0, system = true),
-        Account("18", "5010", "Cost of Goods Sold", AccountType.Expenses, "Cost of Goods Sold", opening = 0.0, system = true),
-        Account("19", "5015", "Depreciation Expense", AccountType.Expenses, "Depreciation Expense", opening = 0.0, system = true),
-        Account("20", "5020", "Salaries", AccountType.Expenses, "Salaries", opening = 0.0, system = true),
-        Account("21", "5030", "Rent", AccountType.Expenses, "Rent", opening = 0.0, system = true),
-        Account("22", "5040", "Utilities", AccountType.Expenses, "Utilities", opening = 0.0, system = true),
-        Account("23", "5050", "Transportation", AccountType.Expenses, "Transportation", opening = 0.0, system = true),
-        Account("24", "5060", "Marketing", AccountType.Expenses, "Marketing", opening = 0.0, system = true),
-        Account("25", "5070", "Office Expenses", AccountType.Expenses, "Office Expenses", opening = 0.0, system = true),
-        Account("26", "5090", "Other Expenses", AccountType.Expenses, "Other Expenses", opening = 0.0, system = true)
+        Account("1", "1010", "Cash in Hand — Munawar", AccountType.Assets, "Cash in Hand", opening = 0.0, system = true),
+        Account("2", "1011", "Cash in Hand — Khalid", AccountType.Assets, "Cash in Hand", opening = 0.0, system = true),
+        Account("3", "1020", "Bank", AccountType.Assets, "Bank", opening = 0.0, system = true),
+        Account("4", "1030", "Accounts Receivable", AccountType.Assets, "Accounts Receivable", opening = 0.0, system = true),
+        Account("5", "1040", "Inventory", AccountType.Assets, "Inventory", opening = 0.0, system = true),
+        Account("6", "1050", "Fixed Assets", AccountType.Assets, "Fixed Assets", opening = 0.0, system = true),
+        Account("7", "1055", "Accumulated Depreciation", AccountType.Assets, "Accumulated Depreciation", opening = 0.0, nature = "Credit", system = true),
+        Account("8", "2010", "Accounts Payable", AccountType.Liabilities, "Accounts Payable", opening = 0.0, system = true),
+        Account("9", "2020", "Loans", AccountType.Liabilities, "Loans", opening = 0.0, system = true),
+        Account("10", "2030", "Accrued Expenses", AccountType.Liabilities, "Accrued Expenses", opening = 0.0, system = true),
+        Account("11", "2035", "Expenses Payable", AccountType.Liabilities, "Expenses Payable", opening = 0.0, system = true),
+        Account("12", "3010", "Owner Capital", AccountType.Equity, "Owner Capital", opening = 0.0, system = true),
+        Account("13", "3020", "Retained Earnings", AccountType.Equity, "Retained Earnings", opening = 0.0, system = true),
+        Account("14", "3030", "Drawings", AccountType.Equity, "Drawings", opening = 0.0, nature = "Debit", system = true),
+        Account("15", "4010", "Sales Revenue", AccountType.Revenue, "Sales Revenue", opening = 0.0, system = true),
+        Account("16", "4020", "Service Revenue", AccountType.Revenue, "Service Revenue", opening = 0.0, system = true),
+        Account("17", "4090", "Other Income", AccountType.Revenue, "Other Income", opening = 0.0, system = true),
+        Account("18", "5005", "Purchases", AccountType.Expenses, "Purchases", opening = 0.0, system = true),
+        Account("19", "5010", "Cost of Goods Sold", AccountType.Expenses, "Cost of Goods Sold", opening = 0.0, system = true),
+        Account("20", "5015", "Depreciation Expense", AccountType.Expenses, "Depreciation Expense", opening = 0.0, system = true),
+        Account("21", "5020", "Salaries", AccountType.Expenses, "Salaries", opening = 0.0, system = true),
+        Account("22", "5030", "Rent", AccountType.Expenses, "Rent", opening = 0.0, system = true),
+        Account("23", "5040", "Utilities", AccountType.Expenses, "Utilities", opening = 0.0, system = true),
+        Account("24", "5050", "Transportation", AccountType.Expenses, "Transportation", opening = 0.0, system = true),
+        Account("25", "5060", "Marketing", AccountType.Expenses, "Marketing", opening = 0.0, system = true),
+        Account("26", "5070", "Office Expenses", AccountType.Expenses, "Office Expenses", opening = 0.0, system = true),
+        Account("27", "5090", "Other Expenses", AccountType.Expenses, "Other Expenses", opening = 0.0, system = true)
     )
 
     private val defaultJournal = emptyList<JournalEntry>()
@@ -50,7 +51,8 @@ object MasRepository {
     private val defaultPurchaseDocs = emptyList<PurchaseDoc>()
 
     private val defaultCashBankAccounts = listOf(
-        CashBankAccount("ACC-001", "Cash in Hand", "Cash", openingBalance = 0.0),
+        CashBankAccount("CSH-MUN", "Cash in Hand — Munawar", "Cash", openingBalance = 0.0),
+        CashBankAccount("CSH-KHL", "Cash in Hand — Khalid", "Cash", openingBalance = 0.0),
         CashBankAccount("ACC-002", "Bank", "Bank", "Main Bank Account", "", openingBalance = 0.0)
     )
 
@@ -165,6 +167,16 @@ object MasRepository {
         val acc = partyAccounts.value.find { it.id == id }
         if (acc != null) {
             partyAccounts.value = partyAccounts.value.filter { it.id != id }
+            if (acc.accountType == PartyAccountType.Customer) {
+                customers.value = customers.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
+            }
+            if (acc.accountType == PartyAccountType.CashInHand) {
+                cashBankAccounts.value = cashBankAccounts.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
+            }
+            if (acc.accountType == PartyAccountType.Factory) {
+                warehouses.value = warehouses.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
+            }
+            accounts.value = accounts.value.filterNot { it.code == acc.code }
             logAudit("Parties", "Delete", acc.code, "Deleted party ${acc.name}")
         }
     }
@@ -243,12 +255,17 @@ object MasRepository {
 
         // 2. If Cash In Hand, sync to cashBankAccounts
         if (party.accountType == PartyAccountType.CashInHand) {
+            val signedOpening = if (party.balanceType.equals("Credit", ignoreCase = true) || party.balanceType.equals("Cr", ignoreCase = true) || party.balanceType.contains("Give", ignoreCase = true)) {
+                -party.openingBalance
+            } else {
+                party.openingBalance
+            }
             val existingCash = cashBankAccounts.value.find { it.id == party.code || it.name.equals(party.name, ignoreCase = true) }
             if (existingCash != null) {
                 cashBankAccounts.value = cashBankAccounts.value.map {
                     if (it.id == existingCash.id) it.copy(
                         name = party.name,
-                        openingBalance = party.openingBalance
+                        openingBalance = signedOpening
                     ) else it
                 }
             } else {
@@ -256,7 +273,7 @@ object MasRepository {
                     id = party.code,
                     name = party.name,
                     kind = "Cash",
-                    openingBalance = party.openingBalance
+                    openingBalance = signedOpening
                 )
             }
         }

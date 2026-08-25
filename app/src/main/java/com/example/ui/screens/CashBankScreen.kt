@@ -120,8 +120,22 @@ fun CashBankAccountsList(
     ) {
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatCard("Total Cash in Hand", formatMoney(totalCash), icon = Icons.Default.Money, tone = MasGreen, modifier = Modifier.weight(1f))
-                StatCard("Total Bank Balance", formatMoney(totalBank), icon = Icons.Default.AccountBalance, tone = MasBlue, modifier = Modifier.weight(1f))
+                val cashDrCr = if (totalCash >= 0) "Dr" else "Cr"
+                val bankDrCr = if (totalBank >= 0) "Dr" else "Cr"
+                StatCard(
+                    "Total Cash in Hand",
+                    "${formatMoney(Math.abs(totalCash))} $cashDrCr",
+                    icon = Icons.Default.Money,
+                    tone = if (totalCash >= 0) MasGreen else MasRed,
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    "Total Bank Balance",
+                    "${formatMoney(Math.abs(totalBank))} $bankDrCr",
+                    icon = Icons.Default.AccountBalance,
+                    tone = if (totalBank >= 0) MasBlue else MasRed,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
 
@@ -140,6 +154,8 @@ fun CashBankAccountsList(
             val inTx = txns.filter { it.accountId == acc.id && it.type == "Receipt" || it.toAccountId == acc.id }.sumOf { it.amount }
             val outTx = txns.filter { it.accountId == acc.id && it.type == "Payment" || it.fromAccountId == acc.id }.sumOf { it.amount }
             val balance = acc.openingBalance + inTx - outTx
+            val drCr = if (balance >= 0) "Dr" else "Cr"
+            val tone = if (balance >= 0) MasGreen else MasRed
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -147,7 +163,7 @@ fun CashBankAccountsList(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth().clickable {
                     editingAccount = acc
-                    newOpeningInput = if (acc.openingBalance > 0) acc.openingBalance.toString() else ""
+                    newOpeningInput = if (acc.openingBalance != 0.0) Math.abs(acc.openingBalance).toString() else ""
                 }
             ) {
                 Row(
@@ -161,10 +177,11 @@ fun CashBankAccountsList(
                             Spacer(modifier = Modifier.width(6.dp))
                             Icon(Icons.Default.Edit, contentDescription = "Edit Opening Balance", tint = MasGreen, modifier = Modifier.size(14.dp))
                         }
-                        Text("Opening: ${formatMoney(acc.openingBalance)} · ${acc.id}", color = MasMuted, fontSize = 11.sp)
+                        val openingDrCr = if (acc.openingBalance >= 0) "Dr" else "Cr"
+                        Text("Opening: ${formatMoney(Math.abs(acc.openingBalance))} $openingDrCr · ${acc.id}", color = MasMuted, fontSize = 11.sp)
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(formatMoney(balance), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MasGreen, fontFamily = FontFamily.Monospace)
+                        Text("${formatMoney(Math.abs(balance))} $drCr", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = tone, fontFamily = FontFamily.Monospace)
                         Text("Current Balance", fontSize = 10.sp, color = MasMuted)
                     }
                 }
@@ -187,6 +204,8 @@ fun CashBankAccountsList(
             val inTx = txns.filter { it.accountId == acc.id && it.type == "Receipt" || it.toAccountId == acc.id }.sumOf { it.amount }
             val outTx = txns.filter { it.accountId == acc.id && it.type == "Payment" || it.fromAccountId == acc.id }.sumOf { it.amount }
             val balance = acc.openingBalance + inTx - outTx
+            val drCr = if (balance >= 0) "Dr" else "Cr"
+            val tone = if (balance >= 0) MasBlue else MasRed
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -194,7 +213,7 @@ fun CashBankAccountsList(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth().clickable {
                     editingAccount = acc
-                    newOpeningInput = if (acc.openingBalance > 0) acc.openingBalance.toString() else ""
+                    newOpeningInput = if (acc.openingBalance != 0.0) Math.abs(acc.openingBalance).toString() else ""
                 }
             ) {
                 Row(
@@ -208,10 +227,11 @@ fun CashBankAccountsList(
                             Spacer(modifier = Modifier.width(6.dp))
                             Icon(Icons.Default.Edit, contentDescription = "Edit Opening Balance", tint = MasBlue, modifier = Modifier.size(14.dp))
                         }
-                        Text("Opening: ${formatMoney(acc.openingBalance)} · ${acc.bankName ?: ""}", color = MasMuted, fontSize = 11.sp)
+                        val openingDrCr = if (acc.openingBalance >= 0) "Dr" else "Cr"
+                        Text("Opening: ${formatMoney(Math.abs(acc.openingBalance))} $openingDrCr · ${acc.bankName ?: ""}", color = MasMuted, fontSize = 11.sp)
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(formatMoney(balance), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MasBlue, fontFamily = FontFamily.Monospace)
+                        Text("${formatMoney(Math.abs(balance))} $drCr", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = tone, fontFamily = FontFamily.Monospace)
                         Text("Current Balance", fontSize = 10.sp, color = MasMuted)
                     }
                 }

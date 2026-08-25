@@ -150,13 +150,41 @@ class MasViewModel : ViewModel() {
         suppList.sumOf { getSupplierBalance(it.id).coerceAtLeast(0.0) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
-    // Cash In Hand: Strictly derived from Cash accounts (NEVER adds or subtracts Receivables or Payables)
-    val cashInHand = combine(cashBankAccounts, cashBankTxns, journal) { accountsList, txnsList, _ ->
-        accountsList.filter { it.kind == "Cash" }.sumOf { acc ->
-            val inTx = txnsList.filter { (it.accountId == acc.id && it.type == "Receipt") || it.toAccountId == acc.id }.sumOf { it.amount }
-            val outTx = txnsList.filter { (it.accountId == acc.id && it.type == "Payment") || it.fromAccountId == acc.id }.sumOf { it.amount }
-            acc.openingBalance + inTx - outTx
+    // Cash in Hand - Munawar (Strictly ledger-based: Dr - Cr)
+    val munawarCash = combine(cashBankAccounts, cashBankTxns, partyAccounts, journal) { accountsList, txnsList, parties, _ ->
+        val munParty = parties.find { it.accountType == PartyAccountType.CashInHand && it.name.contains("Munawar", ignoreCase = true) }
+        val munAcc = accountsList.find { it.kind == "Cash" && (it.name.contains("Munawar", ignoreCase = true) || it.id.contains("MUN", ignoreCase = true)) }
+        val idOrCode = munParty?.code ?: munAcc?.id ?: "CSH-MUN"
+        val name = munParty?.name ?: munAcc?.name ?: "Cash in Hand — Munawar"
+        val signedOpening = if (munParty != null) {
+            if (munParty.balanceType.equals("Credit", ignoreCase = true) || munParty.balanceType.equals("Cr", ignoreCase = true) || munParty.balanceType.contains("Give", ignoreCase = true)) -munParty.openingBalance else munParty.openingBalance
+        } else {
+            munAcc?.openingBalance ?: 0.0
         }
+        val inTx = txnsList.filter { (it.accountId == idOrCode || it.accountId == name || it.toAccountId == idOrCode || it.toAccountId == name) && (it.type == "Receipt" || it.type == "Transfer") }.sumOf { it.amount }
+        val outTx = txnsList.filter { (it.accountId == idOrCode || it.accountId == name || it.fromAccountId == idOrCode || it.fromAccountId == name) && (it.type == "Payment" || it.type == "Transfer") }.sumOf { it.amount }
+        signedOpening + inTx - outTx
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
+    // Cash in Hand - Khalid (Strictly ledger-based: Dr - Cr)
+    val khalidCash = combine(cashBankAccounts, cashBankTxns, partyAccounts, journal) { accountsList, txnsList, parties, _ ->
+        val khalParty = parties.find { it.accountType == PartyAccountType.CashInHand && it.name.contains("Khalid", ignoreCase = true) }
+        val khalAcc = accountsList.find { it.kind == "Cash" && (it.name.contains("Khalid", ignoreCase = true) || it.id.contains("KHL", ignoreCase = true)) }
+        val idOrCode = khalParty?.code ?: khalAcc?.id ?: "CSH-KHL"
+        val name = khalParty?.name ?: khalAcc?.name ?: "Cash in Hand — Khalid"
+        val signedOpening = if (khalParty != null) {
+            if (khalParty.balanceType.equals("Credit", ignoreCase = true) || khalParty.balanceType.equals("Cr", ignoreCase = true) || khalParty.balanceType.contains("Give", ignoreCase = true)) -khalParty.openingBalance else khalParty.openingBalance
+        } else {
+            khalAcc?.openingBalance ?: 0.0
+        }
+        val inTx = txnsList.filter { (it.accountId == idOrCode || it.accountId == name || it.toAccountId == idOrCode || it.toAccountId == name) && (it.type == "Receipt" || it.type == "Transfer") }.sumOf { it.amount }
+        val outTx = txnsList.filter { (it.accountId == idOrCode || it.accountId == name || it.fromAccountId == idOrCode || it.fromAccountId == name) && (it.type == "Payment" || it.type == "Transfer") }.sumOf { it.amount }
+        signedOpening + inTx - outTx
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
+    // Total Cash in Hand (Sum of independent cash accounts for Balance Sheet / Summary views)
+    val cashInHand = combine(munawarCash, khalidCash) { mun, khal ->
+        mun + khal
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
     // Bank Balance: Strictly derived from Bank accounts
@@ -172,26 +200,51 @@ class MasViewModel : ViewModel() {
         list.filter { it.status == "Posted" || it.status == "Paid" }.sumOf { it.amount }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
+    // Helper to get ledger details for specific cash accounts
+    fun getCashAccountBalance(accountKey: String): AccountLedgerBalance {
+        val isMunawar = accountKey.contains("Munawar", ignoreCase = true) || accountKey.contains("MUN", ignoreCase = true)
+        val targetName = if (isMunawar) "Munawar" else "Khalid"
+        val fullName = if (isMunawar) "Cash in Hand — Munawar" else "Cash in Hand — Khalid"
+        val codeDefault = if (isMunawar) "CSH-MUN" else "CSH-KHL"
+
+        val txns = cashBankTxns.value
+        val party = partyAccounts.value.find { it.accountType == PartyAccountType.CashInHand && it.name.contains(targetName, ignoreCase = true) }
+        val acc = cashBankAccounts.value.find { it.kind == "Cash" && (it.name.contains(targetName, ignoreCase = true) || it.id == codeDefault) }
+
+        val code = party?.code ?: acc?.id ?: codeDefault
+        val name = party?.name ?: acc?.name ?: fullName
+        val signedOpening = if (party != null) {
+            if (party.balanceType.equals("Credit", ignoreCase = true) || party.balanceType.equals("Cr", ignoreCase = true) || party.balanceType.contains("Give", ignoreCase = true)) -party.openingBalance else party.openingBalance
+        } else {
+            acc?.openingBalance ?: 0.0
+        }
+
+        val inTx = txns.filter { (it.accountId == code || it.accountId == name || it.toAccountId == code || it.toAccountId == name) && (it.type == "Receipt" || it.type == "Transfer") }.sumOf { it.amount }
+        val outTx = txns.filter { (it.accountId == code || it.accountId == name || it.fromAccountId == code || it.fromAccountId == name) && (it.type == "Payment" || it.type == "Transfer") }.sumOf { it.amount }
+
+        val net = signedOpening + inTx - outTx
+        val totalDebit = (if (signedOpening > 0) signedOpening else 0.0) + inTx
+        val totalCredit = (if (signedOpening < 0) -signedOpening else 0.0) + outTx
+
+        return AccountLedgerBalance(
+            accountCode = code,
+            accountName = name,
+            accountType = "Cash in Hand",
+            normalNature = if (net >= 0) "Debit" else "Credit",
+            openingBalance = Math.abs(signedOpening),
+            totalDebit = totalDebit,
+            totalCredit = totalCredit,
+            currentBalance = Math.abs(net),
+            drCrIndicator = if (net >= 0) "Dr" else "Cr"
+        )
+    }
+
     // Cash in Hand Accounts list with individual Ledger Balances and Dr/Cr tags
     fun getIndividualCashInHandAccounts(): List<AccountLedgerBalance> {
-        val cashAccounts = cashBankAccounts.value.filter { it.kind == "Cash" }
-        val txns = cashBankTxns.value
-        return cashAccounts.map { acc ->
-            val inTx = txns.filter { (it.accountId == acc.id && it.type == "Receipt") || it.toAccountId == acc.id }.sumOf { it.amount }
-            val outTx = txns.filter { (it.accountId == acc.id && it.type == "Payment") || it.fromAccountId == acc.id }.sumOf { it.amount }
-            val net = acc.openingBalance + inTx - outTx
-            AccountLedgerBalance(
-                accountCode = acc.id,
-                accountName = acc.name,
-                accountType = "Cash in Hand",
-                normalNature = "Debit",
-                openingBalance = acc.openingBalance,
-                totalDebit = inTx,
-                totalCredit = outTx,
-                currentBalance = Math.abs(net),
-                drCrIndicator = if (net >= 0) "Dr" else "Cr"
-            )
-        }
+        return listOf(
+            getCashAccountBalance("Munawar"),
+            getCashAccountBalance("Khalid")
+        )
     }
 
     // Factory Stock Synchronization Records

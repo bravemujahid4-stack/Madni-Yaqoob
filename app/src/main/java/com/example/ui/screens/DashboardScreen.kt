@@ -41,7 +41,8 @@ fun DashboardScreen(
     val totalPurchases by viewModel.totalPurchases.collectAsState()
     val totalReceivable by viewModel.totalReceivable.collectAsState()
     val totalPayable by viewModel.totalPayable.collectAsState()
-    val cashInHand by viewModel.cashInHand.collectAsState()
+    val munawarCash by viewModel.munawarCash.collectAsState()
+    val khalidCash by viewModel.khalidCash.collectAsState()
     val bankBalance by viewModel.bankBalance.collectAsState()
     val totalExpenses by viewModel.totalExpenses.collectAsState()
     val netProfit = totalSales - totalPurchases - totalExpenses
@@ -215,27 +216,41 @@ fun DashboardScreen(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                // Row 3: Cash in Hand & Bank Balance
+                // Row 3: Cash in Hand (Munawar) & Cash in Hand (Khalid)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val munDrCr = if (munawarCash > 0) "Dr" else if (munawarCash < 0) "Cr" else ""
+                    val munTone = if (munawarCash >= 0) MasGreen else MasRed
                     StatCard(
-                        label = "Cash in Hand",
-                        value = "${formatMoney(cashInHand)} Dr",
+                        label = "Cash — Munawar",
+                        value = if (munawarCash == 0.0) formatMoney(0.0) else "${formatMoney(Math.abs(munawarCash))} $munDrCr",
                         icon = Icons.Default.Money,
-                        tone = MasInkLight,
-                        sub = "Physical drawers only",
+                        tone = munTone,
+                        sub = if (munawarCash > 0) "Dr Balance" else if (munawarCash < 0) "Cr Balance" else "Settled",
                         modifier = Modifier.weight(1f)
                     )
+                    val khalDrCr = if (khalidCash > 0) "Dr" else if (khalidCash < 0) "Cr" else ""
+                    val khalTone = if (khalidCash >= 0) MasGreen else MasRed
                     StatCard(
-                        label = "Bank Balance",
-                        value = "${formatMoney(bankBalance)} Dr",
-                        icon = Icons.Default.AccountBalance,
-                        tone = MasBlue,
-                        sub = "Operating banks",
+                        label = "Cash — Khalid",
+                        value = if (khalidCash == 0.0) formatMoney(0.0) else "${formatMoney(Math.abs(khalidCash))} $khalDrCr",
+                        icon = Icons.Default.Money,
+                        tone = khalTone,
+                        sub = if (khalidCash > 0) "Dr Balance" else if (khalidCash < 0) "Cr Balance" else "Settled",
                         modifier = Modifier.weight(1f)
                     )
                 }
-                // Row 4: Net Profit & Stock Inventory Value
+                // Row 4: Bank Balance & Net Profit
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val bankDrCr = if (bankBalance > 0) "Dr" else if (bankBalance < 0) "Cr" else ""
+                    val bankTone = if (bankBalance >= 0) MasBlue else MasRed
+                    StatCard(
+                        label = "Bank Balance",
+                        value = if (bankBalance == 0.0) formatMoney(0.0) else "${formatMoney(Math.abs(bankBalance))} $bankDrCr",
+                        icon = Icons.Default.AccountBalance,
+                        tone = bankTone,
+                        sub = if (bankBalance >= 0) "Operating banks" else "Bank Overdraft (Cr)",
+                        modifier = Modifier.weight(1f)
+                    )
                     StatCard(
                         label = "Net Profit",
                         value = formatMoney(netProfit),
@@ -244,21 +259,24 @@ fun DashboardScreen(
                         sub = "Sales - Buy - Exp",
                         modifier = Modifier.weight(1f)
                     )
+                }
+                // Row 5: Stock Inventory Value
+                Row(modifier = Modifier.fillMaxWidth()) {
                     StatCard(
                         label = "Inventory Value",
                         value = formatMoney(totalStockValue),
                         icon = Icons.Default.Inventory2,
                         tone = MasInkLight,
                         sub = "At cost (all locations)",
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
         }
 
-        // Dedicated Cash in Hand Breakdown Card
+        // Dedicated Cash in Hand Ledger Accounts Cards (Munawar & Khalid)
         item {
-            val individualCashAccounts = remember(cashInHand, viewModel.cashBankAccounts) {
+            val individualCashAccounts = remember(munawarCash, khalidCash, viewModel.cashBankAccounts, viewModel.partyAccounts) {
                 viewModel.getIndividualCashInHandAccounts()
             }
             Card(
@@ -276,27 +294,21 @@ fun DashboardScreen(
                             Icon(Icons.Default.AttachMoney, contentDescription = "Cash In Hand", tint = MasGreen, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Cash in Hand Breakdown",
+                                text = "Cash in Hand Accounts",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.5.sp
                             )
                         }
-                        Surface(
-                            color = MasGreenSoft,
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = "Total: ${formatMoney(cashInHand)} Dr",
-                                color = MasGreen,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
+                        Text(
+                            text = "Independent Ledgers",
+                            color = MasMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Physical cash accounts strictly separated from Receivables and Payables",
+                        text = "Physical cash accounts strictly separated from Receivables, Payables, and each other",
                         fontSize = 10.5.sp,
                         color = MasMuted
                     )
@@ -321,13 +333,14 @@ fun DashboardScreen(
                                         fontSize = 10.5.sp
                                     )
                                 }
+                                val statusText = if (acc.currentBalance == 0.0) formatMoney(0.0) else "${formatMoney(acc.currentBalance)} ${acc.drCrIndicator}"
                                 Surface(
-                                    color = if (acc.drCrIndicator == "Dr") MasGreenSoft else MasRedLight,
+                                    color = if (acc.drCrIndicator == "Dr" || acc.currentBalance == 0.0) MasGreenSoft else MasRedLight,
                                     shape = RoundedCornerShape(4.dp)
                                 ) {
                                     Text(
-                                        text = "${formatMoney(acc.currentBalance)} ${acc.drCrIndicator}",
-                                        color = if (acc.drCrIndicator == "Dr") MasGreen else MasRed,
+                                        text = statusText,
+                                        color = if (acc.drCrIndicator == "Dr" || acc.currentBalance == 0.0) MasGreen else MasRed,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
                                         fontFamily = FontFamily.Monospace,
