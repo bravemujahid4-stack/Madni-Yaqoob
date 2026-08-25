@@ -33,6 +33,7 @@ fun ChartOfAccountsScreen(
     var selectedTypeFilter by remember { mutableStateOf<AccountType?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var showAddDialog by remember { mutableStateOf(false) }
+    var accountToDelete by remember { mutableStateOf<Account?>(null) }
 
     // Trial balance check for opening balances
     val totalDebits = accounts.filter { it.active && it.nature == "Debit" }.sumOf { it.opening }
@@ -181,15 +182,33 @@ fun ChartOfAccountsScreen(
                                     fontSize = 11.sp
                                 )
                             }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    text = formatMoney(acc.opening),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.5.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                PillBadge(acc.nature, if (acc.nature == "Debit") "red" else "green")
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = formatMoney(acc.opening),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.5.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    PillBadge(acc.nature, if (acc.nature == "Debit") "red" else "green")
+                                }
+                                if (!acc.system) {
+                                    IconButton(
+                                        onClick = { accountToDelete = acc },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.DeleteOutline,
+                                            contentDescription = "Delete Account",
+                                            tint = MasRed.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
@@ -205,6 +224,23 @@ fun ChartOfAccountsScreen(
                 }
             }
         }
+    }
+
+    // Double Confirmation Dialog for Account Deletion
+    accountToDelete?.let { acc ->
+        DoubleConfirmDeleteDialog(
+            title = "Delete Account",
+            itemName = acc.name,
+            itemCode = acc.code,
+            itemType = acc.type.displayName,
+            additionalDetail = "${acc.category} · Opening: ${formatMoney(acc.opening)} (${acc.nature})",
+            isPermanent = false,
+            onDismiss = { accountToDelete = null },
+            onConfirm = {
+                viewModel.deleteAccount(acc.id)
+                accountToDelete = null
+            }
+        )
     }
 
     // Add Account Dialog

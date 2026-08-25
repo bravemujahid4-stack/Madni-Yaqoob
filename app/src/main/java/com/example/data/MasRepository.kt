@@ -116,6 +116,7 @@ object MasRepository {
     ))
     val isFiscalYearClosed = MutableStateFlow(false)
     val partyAccounts = MutableStateFlow(emptyList<PartyAccount>())
+    val deletedRecords = MutableStateFlow<List<DeletedRecord>>(emptyList())
 
     fun getNextPartyCode(type: PartyAccountType): String {
         val existingCodes = partyAccounts.value.map { it.code.trim().uppercase() }.toSet()
@@ -163,22 +164,36 @@ object MasRepository {
         }
     }
 
-    fun deletePartyAccount(id: String) {
-        val acc = partyAccounts.value.find { it.id == id }
-        if (acc != null) {
-            partyAccounts.value = partyAccounts.value.filter { it.id != id }
-            if (acc.accountType == PartyAccountType.Customer) {
-                customers.value = customers.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
-            }
-            if (acc.accountType == PartyAccountType.CashInHand) {
-                cashBankAccounts.value = cashBankAccounts.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
-            }
-            if (acc.accountType == PartyAccountType.Factory) {
-                warehouses.value = warehouses.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
-            }
-            accounts.value = accounts.value.filterNot { it.code == acc.code }
-            logAudit("Parties", "Delete", acc.code, "Deleted party ${acc.name}")
+    fun deletePartyAccount(id: String): Boolean {
+        val acc = partyAccounts.value.find { it.id == id } ?: return false
+        partyAccounts.value = partyAccounts.value.filter { it.id != id }
+        if (acc.accountType == PartyAccountType.Customer) {
+            customers.value = customers.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
         }
+        if (acc.accountType == PartyAccountType.Supplier) {
+            suppliers.value = suppliers.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
+        }
+        if (acc.accountType == PartyAccountType.CashInHand) {
+            cashBankAccounts.value = cashBankAccounts.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
+        }
+        if (acc.accountType == PartyAccountType.Factory) {
+            warehouses.value = warehouses.value.filterNot { it.id == acc.code || it.name.equals(acc.name, ignoreCase = true) }
+        }
+        accounts.value = accounts.value.filterNot { it.code == acc.code }
+        
+        // Move to Deleted Items / Recycle Bin
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Party Account",
+            itemCode = acc.code,
+            title = acc.name,
+            subtitle = "${acc.accountType.displayName} · ${acc.phone.ifBlank { acc.address.ifBlank { "No contact" } }}",
+            amount = acc.openingBalance,
+            originalPayload = acc
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Parties", "Delete", acc.code, "Moved party ${acc.name} (${acc.code}) to Deleted Items folder")
+        return true
     }
 
     fun importPartyAccounts(rows: List<ImportedAccountRow>, duplicateStrategy: DuplicateStrategy): Pair<Int, Int> {
@@ -244,6 +259,30 @@ object MasRepository {
                 }
             } else {
                 customers.value = customers.value + Customer(
+                    id = party.code,
+                    name = party.name,
+                    phone = party.phone,
+                    address = party.address,
+                    openingBalance = signedOpening
+                )
+            }
+        }
+
+        // 1b. If Supplier, sync to suppliers list
+        if (party.accountType == PartyAccountType.Supplier) {
+            val signedOpening = if (party.balanceType == "Credit") party.openingBalance else -party.openingBalance
+            val existingSupp = suppliers.value.find { it.id == party.code || it.name.equals(party.name, ignoreCase = true) }
+            if (existingSupp != null) {
+                suppliers.value = suppliers.value.map {
+                    if (it.id == existingSupp.id) it.copy(
+                        name = party.name,
+                        phone = party.phone,
+                        address = party.address,
+                        openingBalance = signedOpening
+                    ) else it
+                }
+            } else {
+                suppliers.value = suppliers.value + Supplier(
                     id = party.code,
                     name = party.name,
                     phone = party.phone,
@@ -354,8 +393,271 @@ object MasRepository {
     fun deleteJournalEntry(id: String): Boolean {
         val entry = journal.value.find { it.id == id } ?: return false
         journal.value = journal.value.filter { it.id != id }
-        logAudit("General Ledger", "Delete", id, "Deleted journal entry ${entry.description}")
+        
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Journal Entry",
+            itemCode = entry.id,
+            title = entry.description,
+            subtitle = "${entry.date} · ${entry.source} · ${entry.lines.size} Lines",
+            amount = entry.lines.sumOf { it.debit },
+            originalPayload = entry
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("General Ledger", "Delete", id, "Moved journal entry ${entry.description} to Deleted Items folder")
         return true
+    }
+
+    fun deleteAccount(id: String): Boolean {
+        val acc = accounts.value.find { it.id == id || it.code == id } ?: return false
+        if (acc.system) return false // protect system accounts
+        accounts.value = accounts.value.filterNot { it.id == acc.id || it.code == acc.code }
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Chart of Account",
+            itemCode = acc.code,
+            title = acc.name,
+            subtitle = "${acc.type.displayName} · ${acc.category}",
+            amount = acc.opening,
+            originalPayload = acc
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Chart of Accounts", "Delete", acc.code, "Moved account ${acc.name} (${acc.code}) to Deleted Items folder")
+        return true
+    }
+
+    fun deleteSalesDoc(id: String): Boolean {
+        val doc = salesDocs.value.find { it.id == id } ?: return false
+        salesDocs.value = salesDocs.value.filterNot { it.id == id }
+        val docTotal = doc.items.sumOf { it.qty * it.rate }
+        val customerName = customers.value.find { it.id == doc.customerId }?.name ?: doc.customerId
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Sales Invoice",
+            itemCode = doc.id,
+            title = "${doc.type}: $customerName",
+            subtitle = "${doc.date} · ${doc.status} · Total: Rs $docTotal",
+            amount = docTotal,
+            originalPayload = doc
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Sales", "Delete", id, "Moved sales doc $id to Deleted Items folder")
+        return true
+    }
+
+    fun deletePurchaseDoc(id: String): Boolean {
+        val doc = purchaseDocs.value.find { it.id == id } ?: return false
+        purchaseDocs.value = purchaseDocs.value.filterNot { it.id == id }
+        val docTotal = doc.items.sumOf { it.qty * it.rate }
+        val supplierName = suppliers.value.find { it.id == doc.supplierId }?.name ?: doc.supplierId
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Purchase Bill",
+            itemCode = doc.id,
+            title = "${doc.type}: $supplierName",
+            subtitle = "${doc.date} · ${doc.status} · Total: Rs $docTotal",
+            amount = docTotal,
+            originalPayload = doc
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Purchases", "Delete", id, "Moved purchase doc $id to Deleted Items folder")
+        return true
+    }
+
+    fun deleteExpense(id: String): Boolean {
+        val exp = expenseVouchers.value.find { it.id == id } ?: return false
+        expenseVouchers.value = expenseVouchers.value.filterNot { it.id == id }
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Expense Voucher",
+            itemCode = exp.id,
+            title = "${exp.category}: ${exp.description}",
+            subtitle = "${exp.date} · Paid via ${exp.paidFrom} · Status: ${exp.status}",
+            amount = exp.amount,
+            originalPayload = exp
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Expenses", "Delete", id, "Moved expense $id to Deleted Items folder")
+        return true
+    }
+
+    fun deleteCashBankTxn(id: String): Boolean {
+        val txn = cashBankTxns.value.find { it.id == id } ?: return false
+        cashBankTxns.value = cashBankTxns.value.filterNot { it.id == id }
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Cash/Bank Txn",
+            itemCode = txn.id,
+            title = "${txn.type}: ${txn.description}",
+            subtitle = "${txn.date} · Account: ${txn.accountId}",
+            amount = txn.amount,
+            originalPayload = txn
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Cash & Bank", "Delete", id, "Moved transaction $id to Deleted Items folder")
+        return true
+    }
+
+    fun deleteCustomer(id: String): Boolean {
+        val cust = customers.value.find { it.id == id } ?: return false
+        customers.value = customers.value.filterNot { it.id == id }
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Customer",
+            itemCode = cust.id,
+            title = cust.name,
+            subtitle = "${cust.type} · ${cust.phone.ifBlank { cust.address }}",
+            amount = cust.openingBalance,
+            originalPayload = cust
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Customers", "Delete", id, "Moved customer ${cust.name} to Deleted Items folder")
+        return true
+    }
+
+    fun deleteSupplier(id: String): Boolean {
+        val supp = suppliers.value.find { it.id == id } ?: return false
+        suppliers.value = suppliers.value.filterNot { it.id == id }
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Supplier",
+            itemCode = supp.id,
+            title = supp.name,
+            subtitle = "${supp.phone.ifBlank { supp.address }}",
+            amount = supp.openingBalance,
+            originalPayload = supp
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Suppliers", "Delete", id, "Moved supplier ${supp.name} to Deleted Items folder")
+        return true
+    }
+
+    fun deleteFixedAsset(id: String): Boolean {
+        val asset = fixedAssets.value.find { it.id == id } ?: return false
+        fixedAssets.value = fixedAssets.value.filterNot { it.id == id }
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Fixed Asset",
+            itemCode = asset.id,
+            title = asset.name,
+            subtitle = "${asset.categoryId} · Purchased: ${asset.purchaseDate}",
+            amount = asset.cost,
+            originalPayload = asset
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Fixed Assets", "Delete", id, "Moved fixed asset ${asset.name} to Deleted Items folder")
+        return true
+    }
+
+    fun deleteStockItem(id: String): Boolean {
+        val item = stockItems.value.find { it.id == id } ?: return false
+        stockItems.value = stockItems.value.filterNot { it.id == id }
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Stock Item",
+            itemCode = item.sku,
+            title = item.name,
+            subtitle = "${item.category} · Unit: ${item.unit}",
+            amount = item.costPrice,
+            originalPayload = item
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Inventory", "Delete", item.sku, "Moved stock item ${item.name} to Deleted Items folder")
+        return true
+    }
+
+    // ========================================================================
+    // Deleted Records (Recycle Bin / Others Delete Folder) Management
+    // ========================================================================
+
+    fun restoreDeletedRecord(recordId: String): Boolean {
+        val record = deletedRecords.value.find { it.id == recordId } ?: return false
+        val payload = record.originalPayload
+
+        when (record.itemType) {
+            "Party Account" -> {
+                if (payload is PartyAccount) {
+                    savePartyAccount(payload, updateExisting = true)
+                }
+            }
+            "Chart of Account" -> {
+                if (payload is Account) {
+                    accounts.value = accounts.value.filterNot { it.id == payload.id || it.code == payload.code } + payload
+                }
+            }
+            "Journal Entry" -> {
+                if (payload is JournalEntry) {
+                    journal.value = journal.value.filterNot { it.id == payload.id } + payload
+                }
+            }
+            "Sales Invoice" -> {
+                if (payload is SalesDoc) {
+                    salesDocs.value = salesDocs.value.filterNot { it.id == payload.id } + payload
+                }
+            }
+            "Purchase Bill" -> {
+                if (payload is PurchaseDoc) {
+                    purchaseDocs.value = purchaseDocs.value.filterNot { it.id == payload.id } + payload
+                }
+            }
+            "Expense Voucher" -> {
+                if (payload is ExpenseVoucher) {
+                    expenseVouchers.value = expenseVouchers.value.filterNot { it.id == payload.id } + payload
+                }
+            }
+            "Cash/Bank Txn" -> {
+                if (payload is CashBankTxn) {
+                    cashBankTxns.value = cashBankTxns.value.filterNot { it.id == payload.id } + payload
+                }
+            }
+            "Customer" -> {
+                if (payload is Customer) {
+                    customers.value = customers.value.filterNot { it.id == payload.id } + payload
+                }
+            }
+            "Supplier" -> {
+                if (payload is Supplier) {
+                    suppliers.value = suppliers.value.filterNot { it.id == payload.id } + payload
+                }
+            }
+            "Fixed Asset" -> {
+                if (payload is FixedAsset) {
+                    fixedAssets.value = fixedAssets.value.filterNot { it.id == payload.id } + payload
+                }
+            }
+            "Stock Item" -> {
+                if (payload is StockItem) {
+                    stockItems.value = stockItems.value.filterNot { it.id == payload.id } + payload
+                }
+            }
+        }
+
+        deletedRecords.value = deletedRecords.value.filterNot { it.id == recordId }
+        logAudit("Deleted Items", "Restore", record.itemCode, "Restored ${record.title} (${record.itemType}) back to active records")
+        return true
+    }
+
+    fun permanentlyDeleteRecord(recordId: String): Boolean {
+        val record = deletedRecords.value.find { it.id == recordId } ?: return false
+        deletedRecords.value = deletedRecords.value.filterNot { it.id == recordId }
+        logAudit("Deleted Items", "Permanent Delete", record.itemCode, "Permanently erased ${record.title} (${record.itemType})")
+        return true
+    }
+
+    fun emptyDeletedRecords(): Int {
+        val count = deletedRecords.value.size
+        deletedRecords.value = emptyList()
+        logAudit("Deleted Items", "Empty Trash", "ALL", "Permanently emptied $count deleted records")
+        return count
     }
 
     // Calculate strict double-entry ledger balance for any account

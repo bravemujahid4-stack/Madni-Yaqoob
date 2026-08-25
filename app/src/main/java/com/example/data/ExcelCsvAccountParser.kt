@@ -484,6 +484,7 @@ object ExcelCsvAccountParser {
             appendLine("Account Code,Account Name,Category,Opening Balance,Balance Type,Phone Number,Address,Notes")
             appendLine("OWN-001,Partner A Capital,Owner,500000,Credit,+92 300 1111111,Head Office,Founding partner capital")
             appendLine("INS-001,Investor Alpha,Investor,1000000,Credit,+92 300 2222222,Main Branch,Working capital investment")
+            appendLine("SUP-001,Al-Madina Scrap Traders,Supplier,120000,Credit,+92 300 7777777,Grain Market,Primary scrap vendor")
             appendLine("FAC-001,Main Scrap Factory,Factory,0,Debit,+92 300 3333333,Site Area,Factory operations account")
             appendLine("LAB-001,Plant Operator Lead,Labour & Employee,0,Debit,+92 300 4444444,Factory Quarter,Monthly salary labour")
             appendLine("CUS-001,National Steel Mills,Customer,75000,Debit,+92 300 5555555,Industrial Zone,Wholesale customer")

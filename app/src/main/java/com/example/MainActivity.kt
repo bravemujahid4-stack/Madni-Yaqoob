@@ -75,7 +75,9 @@ fun MasErpApp(viewModel: MasViewModel = viewModel()) {
     val currentUser by viewModel.currentUser.collectAsState()
     val companyProfile by viewModel.companyProfile.collectAsState()
     val journal by viewModel.journal.collectAsState()
+    val deletedRecords by viewModel.deletedRecords.collectAsState()
     val pendingJEs = journal.count { it.status == "Pending Approval" }
+    val deletedCount = deletedRecords.size
 
     val navItems = listOf(
         // Executive
@@ -105,7 +107,8 @@ fun MasErpApp(viewModel: MasViewModel = viewModel()) {
         NavMenuItem("step13", "Fixed Assets Register", "Operations", Icons.Default.Domain),
 
         // Administration
-        NavMenuItem("users", "Users & Access Control", "Administration", Icons.Default.AdminPanelSettings)
+        NavMenuItem("users", "Users & Access Control", "Administration", Icons.Default.AdminPanelSettings),
+        NavMenuItem("trash", "Deleted Items Folder", "Administration", Icons.Default.DeleteSweep, if (deletedCount > 0) "$deletedCount" else null)
     )
 
     val currentItem = navItems.find { it.id == currentRoute } ?: navItems.first()
@@ -160,6 +163,22 @@ fun MasErpApp(viewModel: MasViewModel = viewModel()) {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { currentRoute = "trash" }) {
+                            BadgedBox(badge = {
+                                if (deletedCount > 0) {
+                                    Badge(containerColor = MasRed) {
+                                        Text("$deletedCount", fontSize = 10.sp, color = Color.White)
+                                    }
+                                }
+                            }) {
+                                Icon(
+                                    Icons.Default.DeleteOutline,
+                                    contentDescription = "Deleted Items",
+                                    tint = if (currentRoute == "trash") MasRed else MasMuted
+                                )
+                            }
+                        }
+
                         // User Profile Badge
                         Surface(
                             color = MasRedLight,
@@ -292,6 +311,7 @@ fun MasErpApp(viewModel: MasViewModel = viewModel()) {
                     "docs" -> DocumentsScreen(viewModel = viewModel)
                     "closing" -> PeriodClosingScreen(viewModel = viewModel)
                     "users" -> UsersRolesScreen(viewModel = viewModel)
+                    "trash" -> DeletedFolderScreen(viewModel = viewModel, onNavigateBack = { currentRoute = "step1" })
                     else -> DashboardScreen(viewModel = viewModel, onNavigateToModule = { currentRoute = it })
                 }
             }

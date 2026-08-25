@@ -48,6 +48,7 @@ class MasViewModel : ViewModel() {
     val auditLog = MasRepository.auditLog
     val periodStatuses = MasRepository.periodStatuses
     val isFiscalYearClosed = MasRepository.isFiscalYearClosed
+    val deletedRecords = MasRepository.deletedRecords
 
     // UI Feedback state
     private val _userMessage = MutableStateFlow<String?>(null)
@@ -876,8 +877,101 @@ class MasViewModel : ViewModel() {
     }
 
     fun deletePartyAccount(id: String) {
-        MasRepository.deletePartyAccount(id)
-        showMessage("Account removed.")
+        val success = MasRepository.deletePartyAccount(id)
+        if (success) {
+            showMessage("Account safely moved to Deleted Items folder.")
+        }
+    }
+
+    fun deleteAccount(id: String) {
+        val success = MasRepository.deleteAccount(id)
+        if (success) {
+            showMessage("Account moved to Deleted Items folder.")
+        } else {
+            showMessage("System accounts cannot be deleted.")
+        }
+    }
+
+    fun deleteJournalEntry(id: String) {
+        val success = MasRepository.deleteJournalEntry(id)
+        if (success) {
+            showMessage("Journal entry moved to Deleted Items folder.")
+        }
+    }
+
+    fun deleteSalesDoc(id: String) {
+        val success = MasRepository.deleteSalesDoc(id)
+        if (success) {
+            showMessage("Sales record moved to Deleted Items folder.")
+        }
+    }
+
+    fun deletePurchaseDoc(id: String) {
+        val success = MasRepository.deletePurchaseDoc(id)
+        if (success) {
+            showMessage("Purchase record moved to Deleted Items folder.")
+        }
+    }
+
+    fun deleteExpense(id: String) {
+        val success = MasRepository.deleteExpense(id)
+        if (success) {
+            showMessage("Expense voucher moved to Deleted Items folder.")
+        }
+    }
+
+    fun deleteCashBankTxn(id: String) {
+        val success = MasRepository.deleteCashBankTxn(id)
+        if (success) {
+            showMessage("Cash/Bank transaction moved to Deleted Items folder.")
+        }
+    }
+
+    fun deleteCustomer(id: String) {
+        val success = MasRepository.deleteCustomer(id)
+        if (success) {
+            showMessage("Customer moved to Deleted Items folder.")
+        }
+    }
+
+    fun deleteSupplier(id: String) {
+        val success = MasRepository.deleteSupplier(id)
+        if (success) {
+            showMessage("Supplier moved to Deleted Items folder.")
+        }
+    }
+
+    fun deleteFixedAsset(id: String) {
+        val success = MasRepository.deleteFixedAsset(id)
+        if (success) {
+            showMessage("Fixed asset moved to Deleted Items folder.")
+        }
+    }
+
+    fun deleteStockItem(id: String) {
+        val success = MasRepository.deleteStockItem(id)
+        if (success) {
+            showMessage("Stock item moved to Deleted Items folder.")
+        }
+    }
+
+    fun restoreDeletedRecord(recordId: String) {
+        val success = MasRepository.restoreDeletedRecord(recordId)
+        if (success) {
+            showMessage("Record successfully restored back to active accounts.")
+        }
+    }
+
+    fun permanentlyDeleteRecord(recordId: String) {
+        val success = MasRepository.permanentlyDeleteRecord(recordId)
+        if (success) {
+            showMessage("Record permanently deleted.")
+        }
+    }
+
+    fun emptyDeletedRecords() {
+        val count = MasRepository.emptyDeletedRecords()
+        showMessage("Cleared $count items from Deleted Items folder.")
     }
 
     fun importPartyAccounts(rows: List<ImportedAccountRow>, duplicateStrategy: DuplicateStrategy) {

@@ -47,6 +47,7 @@ fun PartyAccountsScreen(viewModel: MasViewModel) {
     var importPreviewResult by remember { mutableStateOf<ImportPreviewResult?>(null) }
     var duplicateStrategy by remember { mutableStateOf(DuplicateStrategy.SkipDuplicates) }
     var showTemplateDialog by remember { mutableStateOf(false) }
+    var partyToDelete by remember { mutableStateOf<PartyAccount?>(null) }
 
     // File picker launcher for Excel (.xlsx) and CSV (.csv)
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -346,11 +347,28 @@ fun PartyAccountsScreen(viewModel: MasViewModel) {
                         showAddDialog = true
                     },
                     onDelete = {
-                        viewModel.deletePartyAccount(party.id)
+                        partyToDelete = party
                     }
                 )
             }
         }
+    }
+
+    // Double Confirmation Dialog for Party Deletion
+    partyToDelete?.let { party ->
+        DoubleConfirmDeleteDialog(
+            title = "Delete Party Account",
+            itemName = party.name,
+            itemCode = party.code,
+            itemType = party.accountType.displayName,
+            additionalDetail = "Opening Balance: ${formatMoney(party.openingBalance)} (${party.balanceType}) · Phone: ${party.phone.ifBlank { "None" }}",
+            isPermanent = false,
+            onDismiss = { partyToDelete = null },
+            onConfirm = {
+                viewModel.deletePartyAccount(party.id)
+                partyToDelete = null
+            }
+        )
     }
 
     // Add / Edit Account Dialog
@@ -994,14 +1012,14 @@ fun SampleTemplateDialog(
                     shape = RoundedCornerShape(6.dp)
                 ) {
                     Text(
-                        text = "1. Account Code (e.g. OWN-001, CUS-001 or Leave blank for auto)\n" +
-                               "2. Account Name (e.g. Munawar Hussain)\n" +
-                               "3. Category (Owner, Investor, Factory, Labour & Employee, Customer, Cash In Hand)\n" +
+                        text = "1. Account Code (e.g. OWN-001, SUP-001, CUS-001 or Leave blank for auto)\n" +
+                               "2. Account Name (e.g. Al-Madina Scrap / Munawar Hussain)\n" +
+                               "3. Category (Owner, Investor, Supplier, Factory, Labour & Employee, Customer, Cash In Hand)\n" +
                                "4. Opening Balance (e.g. 50000)\n" +
                                "5. Balance Type (Debit / Dr / Get or Credit / Cr / Give)\n" +
                                "6. Phone Number (e.g. +92 300 1234567)\n" +
                                "7. Address (e.g. Industrial Area)\n" +
-                               "8. Notes (e.g. Partner share)",
+                               "8. Notes (e.g. Vendor share)",
                         color = Color.White,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 10.5.sp,
@@ -1039,6 +1057,7 @@ fun getPartyTypeColor(type: PartyAccountType): Color {
     return when (type) {
         PartyAccountType.Owner -> Color(0xFF673AB7) // Purple
         PartyAccountType.Investor -> Color(0xFF00897B) // Teal
+        PartyAccountType.Supplier -> Color(0xFF8E24AA) // Amethyst / Violet
         PartyAccountType.Factory -> Color(0xFFE65100) // Deep Orange
         PartyAccountType.LabourEmployee -> Color(0xFF1565C0) // Deep Blue
         PartyAccountType.Customer -> Color(0xFF2E7D32) // Forest Green

@@ -12,7 +12,7 @@ enum class AccountType(val displayName: String, val normalBalance: String) {
     Expenses("Expenses", "Debit")
 }
 
-// 6 Dedicated Party / Account Types with exact Code Prefixes
+// 7 Dedicated Party / Account Types with exact Code Prefixes
 enum class PartyAccountType(
     val displayName: String,
     val codePrefix: String,
@@ -22,6 +22,7 @@ enum class PartyAccountType(
 ) {
     Owner("Owner", "OWN", AccountType.Equity, "Credit", "Owner Capital"),
     Investor("Investor", "INS", AccountType.Liabilities, "Credit", "Investor Account"),
+    Supplier("Supplier", "SUP", AccountType.Liabilities, "Credit", "Accounts Payable"),
     Factory("Factory", "FAC", AccountType.Expenses, "Debit", "Factory Operations"),
     LabourEmployee("Labour & Employee", "LAB", AccountType.Expenses, "Debit", "Labour & Salaries"),
     Customer("Customer", "CUS", AccountType.Assets, "Debit", "Accounts Receivable"),
@@ -34,6 +35,7 @@ enum class PartyAccountType(
             return when {
                 s.equals("Owner", ignoreCase = true) || s.startsWith("OWN", ignoreCase = true) || s.contains("Owner", ignoreCase = true) || s.contains("Proprietor", ignoreCase = true) || s.contains("Partner", ignoreCase = true) -> Owner
                 s.equals("Investor", ignoreCase = true) || s.startsWith("INS", ignoreCase = true) || s.startsWith("INV", ignoreCase = true) || s.contains("Investor", ignoreCase = true) || s.contains("Investment", ignoreCase = true) -> Investor
+                s.equals("Supplier", ignoreCase = true) || s.startsWith("SUP", ignoreCase = true) || s.contains("Supplier", ignoreCase = true) || s.contains("Vendor", ignoreCase = true) || s.contains("Creditor", ignoreCase = true) || s.contains("Seller", ignoreCase = true) || s.contains("Payable", ignoreCase = true) -> Supplier
                 s.equals("Factory", ignoreCase = true) || s.startsWith("FAC", ignoreCase = true) || s.contains("Factory", ignoreCase = true) || s.contains("Karkhana", ignoreCase = true) || s.contains("Mill", ignoreCase = true) || s.contains("Plant", ignoreCase = true) -> Factory
                 s.equals("Labour & Employee", ignoreCase = true) || s.startsWith("LAB", ignoreCase = true) || s.contains("Labour", ignoreCase = true) || s.contains("Labor", ignoreCase = true) || s.contains("Employee", ignoreCase = true) || s.contains("Worker", ignoreCase = true) || s.contains("Staff", ignoreCase = true) || s.contains("Salary", ignoreCase = true) -> LabourEmployee
                 s.equals("Customer", ignoreCase = true) || s.startsWith("CUS", ignoreCase = true) || s.contains("Customer", ignoreCase = true) || s.contains("Client", ignoreCase = true) || s.contains("Buyer", ignoreCase = true) || s.contains("Debtor", ignoreCase = true) -> Customer
@@ -50,7 +52,7 @@ data class PartyAccount(
     val name: String,
     val accountType: PartyAccountType,
     val openingBalance: Double = 0.0,
-    val balanceType: String = if (accountType == PartyAccountType.Owner || accountType == PartyAccountType.Investor) "Credit" else "Debit", // Debit (Get) or Credit (Give)
+    val balanceType: String = if (accountType == PartyAccountType.Owner || accountType == PartyAccountType.Investor || accountType == PartyAccountType.Supplier) "Credit" else "Debit", // Debit (Get) or Credit (Give)
     val phone: String = "",
     val address: String = "",
     val notes: String = "",
@@ -498,5 +500,21 @@ data class DoubleEntryIntegrityCheck(
     val totalCredits: Double,
     val difference: Double,
     val imbalancedEntries: List<JournalEntry> = emptyList()
+)
+
+// ============================================================================
+// Deleted Items / Recycle Bin (Others Delete Folders) Model
+// ============================================================================
+
+data class DeletedRecord(
+    val id: String,
+    val itemType: String, // "Party Account", "Chart of Account", "Journal Entry", "Customer", "Supplier", "Sales Invoice", "Purchase Bill", "Expense Voucher", "Cash/Bank Txn", "Fixed Asset", "Stock Item"
+    val itemCode: String,
+    val title: String,
+    val subtitle: String,
+    val amount: Double? = null,
+    val deletedAt: Long = System.currentTimeMillis(),
+    val deletedBy: String = "Admin",
+    val originalPayload: Any? = null
 )
 
