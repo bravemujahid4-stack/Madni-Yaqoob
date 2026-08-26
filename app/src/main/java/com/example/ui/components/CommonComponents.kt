@@ -64,22 +64,111 @@ fun MasLogoBadge(
         modifier = modifier
             .size(size)
             .clip(RoundedCornerShape(8.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(MasRedBright, MasRed, MasRedDark)
-                )
-            ),
+            .background(Color(0xFF0A0A0A))
+            .border(0.5.dp, Color(0xFF2A2A2A), RoundedCornerShape(8.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "M",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = (size.value * 0.55f).sp,
-            fontFamily = FontFamily.SansSerif
+        androidx.compose.foundation.Image(
+            painter = painterResource(id = R.drawable.img_mas_logo),
+            contentDescription = "MAS Official Logo",
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(2.dp),
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit
         )
     }
 }
+
+@Composable
+fun MasBrandLogo(
+    modifier: Modifier = Modifier,
+    height: Dp = 42.dp
+) {
+    Box(
+        modifier = modifier
+            .height(height)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF000000))
+            .border(1.dp, Color(0xFF222222), RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        androidx.compose.foundation.Image(
+            painter = painterResource(id = R.drawable.img_mas_logo),
+            contentDescription = "MAS Official Logo",
+            modifier = Modifier.fillMaxHeight(),
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        )
+    }
+}
+
+@Composable
+fun MasHeroLogoBanner(
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF000000)),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF222222))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF080808))
+                        .border(1.dp, MasRed.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.foundation.Image(
+                        painter = painterResource(id = R.drawable.img_mas_logo),
+                        contentDescription = "MAS Logo",
+                        modifier = Modifier.fillMaxSize().padding(4.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "MAS ENTERPRISE",
+                        color = Color.White,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 15.sp,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Official Accounting & ERP System",
+                        color = MasRedBright,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+            Surface(
+                color = MasRed.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(0.5.dp, MasRed.copy(alpha = 0.6f))
+            ) {
+                Text(
+                    text = "VERIFIED",
+                    color = MasRedBright,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                )
+            }
+        }
+    }
+}
+
 
 @Composable
 fun MasTopBar(

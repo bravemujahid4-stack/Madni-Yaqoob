@@ -67,6 +67,10 @@ fun DashboardScreen(
     ) {
         // Welcome Header & Brand Banner
         item {
+            MasHeroLogoBanner()
+        }
+
+        item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MasInk),
                 shape = RoundedCornerShape(12.dp),

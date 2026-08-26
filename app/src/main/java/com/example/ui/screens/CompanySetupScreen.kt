@@ -57,6 +57,10 @@ fun CompanySetupScreen(viewModel: MasViewModel) {
 
         // Company Identity Card
         item {
+            MasHeroLogoBanner()
+        }
+
+        item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -66,7 +70,7 @@ fun CompanySetupScreen(viewModel: MasViewModel) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         MasLogoBadge(size = 28.dp)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Company Identity", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Company Identity & Brand Profile", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
 
                     OutlinedTextField(
