@@ -33,6 +33,7 @@ import com.example.ui.components.PillBadge
 import com.example.ui.screens.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MasViewModel
+import com.example.data.MasStorageManager
 import kotlinx.coroutines.launch
 
 data class NavMenuItem(
@@ -46,6 +47,7 @@ data class NavMenuItem(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        MasStorageManager.initialize(applicationContext)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {

@@ -113,9 +113,34 @@ object ExcelCsvAccountParser {
             val address = getCell(row, colMap["address"])
             val notes = getCell(row, colMap["notes"])
 
-            val resolvedType = PartyAccountType.fromString(categoryStr)
-            val openingBalance = parseAmount(openingStr)
+            // Opening stock columns
+            val opQtyStr = getCell(row, colMap["opening_qty"])
+            val unitStr = getCell(row, colMap["unit"]).ifBlank { "Kg" }
+            val opRateStr = getCell(row, colMap["opening_rate"])
+            val opValueStr = getCell(row, colMap["opening_value"])
+
+            val parsedOpQty = parseAmount(opQtyStr)
+            val parsedOpRate = parseAmount(opRateStr)
+            var parsedOpValue = parseAmount(opValueStr)
+            if (parsedOpValue == 0.0 && parsedOpQty > 0.0 && parsedOpRate > 0.0) {
+                parsedOpValue = parsedOpQty * parsedOpRate
+            }
+
+            // Automatic Account Classification:
+            // 1. First priority: Match code prefix (e.g. CUS001, SUP001, OWN001, FAC001, CASH001, INVESTOR001, LAB001)
+            val typeByPrefix = PartyAccountType.fromCodePrefix(rawCode)
+            // 2. Second priority: Match category string
+            val typeByCategory = PartyAccountType.fromString(categoryStr)
+            // 3. Fallback: match if rawCode itself holds a type string
+            val resolvedType = typeByPrefix ?: typeByCategory ?: PartyAccountType.fromString(rawCode)
+
+            var openingBalance = parseAmount(openingStr)
+            if (openingBalance == 0.0 && parsedOpValue > 0.0) {
+                openingBalance = parsedOpValue
+            }
             val balanceType = resolveBalanceType(balanceTypeStr, resolvedType)
+
+            val hasOpeningStock = parsedOpQty > 0.0 || parsedOpValue > 0.0
 
             val assignedCode = when {
                 rawCode.isNotBlank() -> rawCode.trim()
@@ -123,14 +148,16 @@ object ExcelCsvAccountParser {
                 else -> ""
             }
 
+            // Unknown Code Prefix check:
+            val isUnknownPrefix = rawCode.isNotBlank() && typeByPrefix == null && typeByCategory == null
+
             // Duplicate detection check
             var duplicateMatch: PartyAccount? = null
             var duplicateReason: String? = null
 
             if (resolvedType != null && name.isNotBlank()) {
-                // Rule 8: Check duplicate with SAME account type
                 duplicateMatch = existingAccounts.firstOrNull { existing ->
-                    val codeMatch = existing.code.equals(assignedCode, ignoreCase = true)
+                    val codeMatch = assignedCode.isNotBlank() && existing.code.equals(assignedCode, ignoreCase = true)
                     val nameAndTypeMatch = existing.name.equals(name, ignoreCase = true) && existing.accountType == resolvedType
                     val phoneAndTypeMatch = phone.isNotBlank() && existing.phone.isNotBlank() && existing.phone == phone && existing.accountType == resolvedType
                     codeMatch || nameAndTypeMatch || phoneAndTypeMatch
@@ -145,8 +172,13 @@ object ExcelCsvAccountParser {
                 }
             }
 
+            val prefixWarning = if (isUnknownPrefix) {
+                "Unknown code prefix '$rawCode'. Expected CUS, SUP, OWN, FAC, CASH, INVESTOR, or LAB."
+            } else null
+
             val status = when {
                 name.isBlank() -> "Missing Name"
+                isUnknownPrefix -> "Unknown Code Prefix"
                 resolvedType == null -> "Missing Category"
                 duplicateMatch != null -> "Duplicate"
                 else -> "Ready"
@@ -158,16 +190,22 @@ object ExcelCsvAccountParser {
                     rawCode = rawCode,
                     assignedCode = assignedCode,
                     name = name,
-                    categoryString = categoryStr,
+                    categoryString = categoryStr.ifBlank { resolvedType?.displayName ?: "" },
                     resolvedType = resolvedType,
                     openingBalance = openingBalance,
                     balanceType = balanceType,
+                    openingQty = parsedOpQty,
+                    unit = unitStr,
+                    openingRate = parsedOpRate,
+                    openingValue = parsedOpValue,
+                    hasOpeningStock = hasOpeningStock,
                     phone = phone,
                     address = address,
                     notes = notes,
                     status = status,
                     duplicateReason = duplicateReason,
-                    existingAccountId = duplicateMatch?.id
+                    existingAccountId = duplicateMatch?.id,
+                    prefixWarning = prefixWarning
                 )
             )
         }
@@ -194,8 +232,12 @@ object ExcelCsvAccountParser {
             row.forEachIndexed { colIdx, text ->
                 when {
                     text.contains("code") || text == "id" || text == "acc code" || text == "account code" -> map["code"] = colIdx
-                    text.contains("name") || text == "party" || text == "account" || text == "title" || text == "party name" || text == "account name" -> if (!map.containsKey("name")) map["name"] = colIdx
+                    text.contains("name") || text == "party" || text == "account" || text == "title" || text == "party name" || text == "account name" || text == "factory" -> if (!map.containsKey("name")) map["name"] = colIdx
                     text.contains("category") || text.contains("type") || text == "acc type" || text == "group" || text == "account type" -> if (!map.containsKey("category")) map["category"] = colIdx
+                    text.contains("opening qty") || text.contains("op qty") || text == "qty" || text == "quantity" || text.contains("stock qty") -> map["opening_qty"] = colIdx
+                    text == "unit" || text == "uom" || text == "measure" -> map["unit"] = colIdx
+                    text.contains("opening rate") || text.contains("op rate") || text == "rate" || text == "cost" || text == "unit cost" || text == "price" -> map["opening_rate"] = colIdx
+                    text.contains("opening value") || text.contains("op value") || text.contains("stock value") || text == "value" || text == "total value" -> map["opening_value"] = colIdx
                     text.contains("opening") || text.contains("balance") || text == "opening bal" || text == "op bal" || text == "amount" -> if (!map.containsKey("opening")) map["opening"] = colIdx
                     text.contains("dr/cr") || text.contains("dr / cr") || text.contains("nature") || text.contains("get/give") || text == "balance type" || text == "type (dr/cr)" -> map["balance_type"] = colIdx
                     text.contains("phone") || text.contains("mobile") || text.contains("contact") || text.contains("cell") || text.contains("whatsapp") -> map["phone"] = colIdx
@@ -481,14 +523,16 @@ object ExcelCsvAccountParser {
      */
     fun generateSampleCsv(): String {
         return buildString {
-            appendLine("Account Code,Account Name,Category,Opening Balance,Balance Type,Phone Number,Address,Notes")
-            appendLine("OWN-001,Partner A Capital,Owner,500000,Credit,+92 300 1111111,Head Office,Founding partner capital")
-            appendLine("INS-001,Investor Alpha,Investor,1000000,Credit,+92 300 2222222,Main Branch,Working capital investment")
-            appendLine("SUP-001,Al-Madina Scrap Traders,Supplier,120000,Credit,+92 300 7777777,Grain Market,Primary scrap vendor")
-            appendLine("FAC-001,Main Scrap Factory,Factory,0,Debit,+92 300 3333333,Site Area,Factory operations account")
-            appendLine("LAB-001,Plant Operator Lead,Labour & Employee,0,Debit,+92 300 4444444,Factory Quarter,Monthly salary labour")
-            appendLine("CUS-001,National Steel Mills,Customer,75000,Debit,+92 300 5555555,Industrial Zone,Wholesale customer")
-            appendLine("CASH-001,Primary Factory Cash,Cash In Hand,250000,Debit,+92 300 6666666,Cash Vault,Vault cash in hand")
+            appendLine("Account Code,Account Name,Category,Opening Qty,Unit,Opening Rate,Opening Value,Balance Type,Phone Number,Address,Notes")
+            appendLine("OWN001,Partner A Capital,Owner,0,,0,500000,Credit,+92 300 1111111,Head Office,Founding partner capital")
+            appendLine("INVESTOR001,Investor Alpha,Investor,0,,0,1000000,Credit,+92 300 2222222,Main Branch,Working capital investment")
+            appendLine("SUP001,Al-Madina Scrap Traders,Supplier,0,,0,120000,Credit,+92 300 7777777,Grain Market,Primary scrap vendor")
+            appendLine("FAC001,Scrap Khata,Factory,850,Kg,320,272000,Debit,+92 300 3333333,Site Area,Scrap factory stock")
+            appendLine("FAC002,Al Faiz Cotton,Factory,400,Bags,650,260000,Debit,+92 300 8888888,Industrial Zone,Raw cotton inventory")
+            appendLine("CUS001,National Steel Mills,Customer,0,,0,75000,Debit,+92 300 5555555,Industrial Zone,Wholesale customer")
+            appendLine("CASH001,Munawar Cash,Cash In Hand,0,,0,250000,Debit,+92 300 6666666,Main Counter,Primary cash in hand")
+            appendLine("CASH002,Khalid Cash,Cash In Hand,0,,0,180000,Debit,+92 300 9999999,Sub Counter,Secondary cash in hand")
+            appendLine("LAB001,Plant Operator Lead,Labour & Employee,0,,0,0,Debit,+92 300 4444444,Factory Quarter,Monthly salary labour")
         }
     }
 }

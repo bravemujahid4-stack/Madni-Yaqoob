@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,10 +29,13 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InventoryScreen(viewModel: MasViewModel) {
-    var subTab by remember { mutableStateOf("items") } // items, new, transfer, adjust, ledger
+    var subTab by remember { mutableStateOf("factory_stock") } // factory_stock, opening_stock, items, new, transfer, adjust, ledger
     val items by viewModel.stockItems.collectAsState()
     val moves by viewModel.stockMoves.collectAsState()
     val warehouses by viewModel.warehouses.collectAsState()
+    val partyAccounts by viewModel.partyAccounts.collectAsState()
+    val openingRecords by viewModel.openingStockRecords.collectAsState()
+    val factoryStockRecords = remember(partyAccounts, items, moves, openingRecords) { MasRepository.getFactoryStockRecords() }
     var searchQuery by remember { mutableStateOf("") }
 
     val totalValuation = remember(items, moves) { viewModel.getTotalStockValue() }
@@ -42,17 +46,19 @@ fun InventoryScreen(viewModel: MasViewModel) {
             .padding(horizontal = 14.dp)
     ) {
         SectionHeader(
-            title = "Inventory & Stock Control",
-            subtitle = "Track stock on hand, reorder levels, multi-warehouse movements & adjustments.",
+            title = "Inventory & Factory Stock",
+            subtitle = "Track factory-specific opening stock, purchases, sales, and total stock balances.",
             actionButton = {
-                Button(
-                    onClick = { subTab = "new" },
-                    colors = ButtonDefaults.buttonColors(containerColor = MasRed),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add Item", fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { subTab = "new" },
+                        colors = ButtonDefaults.buttonColors(containerColor = MasRed),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Item", fontSize = 12.sp)
+                    }
                 }
             }
         )
@@ -61,14 +67,17 @@ fun InventoryScreen(viewModel: MasViewModel) {
             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            item { FilterChip(selected = subTab == "items", onClick = { subTab = "items" }, label = { Text("Stock Items (${items.size})") }) }
-            item { FilterChip(selected = subTab == "new", onClick = { subTab = "new" }, label = { Text("+ New Item") }) }
-            item { FilterChip(selected = subTab == "transfer", onClick = { subTab = "transfer" }, label = { Text("Warehouse Transfer") }) }
+            item { FilterChip(selected = subTab == "factory_stock", onClick = { subTab = "factory_stock" }, label = { Text("Factory Stock (${factoryStockRecords.size})") }) }
+            item { FilterChip(selected = subTab == "opening_stock", onClick = { subTab = "opening_stock" }, label = { Text("Opening Stock (${openingRecords.size})") }) }
+            item { FilterChip(selected = subTab == "items", onClick = { subTab = "items" }, label = { Text("All Items (${items.size})") }) }
+            item { FilterChip(selected = subTab == "transfer", onClick = { subTab = "transfer" }, label = { Text("Transfer") }) }
             item { FilterChip(selected = subTab == "adjust", onClick = { subTab = "adjust" }, label = { Text("Adjustment") }) }
-            item { FilterChip(selected = subTab == "ledger", onClick = { subTab = "ledger" }, label = { Text("Stock Movements") }) }
+            item { FilterChip(selected = subTab == "ledger", onClick = { subTab = "ledger" }, label = { Text("Movement Log") }) }
         }
 
         when (subTab) {
+            "factory_stock" -> FactoryStockListView(viewModel, factoryStockRecords)
+            "opening_stock" -> OpeningStockListView(viewModel, openingRecords, partyAccounts)
             "items" -> StockItemsListView(viewModel, items, searchQuery, { searchQuery = it }, totalValuation)
             "new" -> NewStockItemForm(viewModel) { subTab = "items" }
             "transfer" -> WarehouseTransferForm(viewModel, items, warehouses) { subTab = "items" }
@@ -400,4 +409,484 @@ fun StockLedgerListView(items: List<StockItem>, moves: List<StockMove>) {
             }
         }
     }
+}
+
+@Composable
+fun FactoryStockListView(
+    viewModel: MasViewModel,
+    factories: List<FactoryStockRecord>
+) {
+    val totalFactoryQty = factories.sumOf { it.totalQuantity }
+    val totalFactoryVal = factories.sumOf { it.totalValue }
+    val totalOpeningQty = factories.sumOf { it.openingStockQty }
+    val totalPurchasesQty = factories.sumOf { it.purchasesQty }
+    val totalSalesQty = factories.sumOf { it.salesQty }
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 80.dp)
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MasPaperSoft),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Total Factory Stock Valuation", fontSize = 11.5.sp, color = MasMuted)
+                            Text(formatMoney(totalFactoryVal), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = MasInk, fontFamily = FontFamily.Monospace)
+                        }
+                        PillBadge("${factories.size} Factories", "orange")
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Opening", fontSize = 10.sp, color = MasMuted)
+                            Text("${formatQty(totalOpeningQty)} Qty", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MasBlue)
+                        }
+                        Column {
+                            Text("Purchases", fontSize = 10.sp, color = MasMuted)
+                            Text("+ ${formatQty(totalPurchasesQty)} Qty", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MasGreen)
+                        }
+                        Column {
+                            Text("Sales", fontSize = 10.sp, color = MasMuted)
+                            Text("- ${formatQty(totalSalesQty)} Qty", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MasRed)
+                        }
+                        Column {
+                            Text("Current Stock", fontSize = 10.sp, color = MasMuted)
+                            Text("${formatQty(totalFactoryQty)} Qty", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MasInk)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (factories.isEmpty()) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Factory, contentDescription = null, tint = MasMuted, modifier = Modifier.size(36.dp))
+                        Text("No Factory Accounts Found", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Create a party account with Category 'Factory / Inventory' (FAC prefix) or import via Excel.", fontSize = 11.5.sp, color = MasMuted)
+                    }
+                }
+            }
+        }
+
+        items(factories) { fac ->
+            var expanded by remember { mutableStateOf(false) }
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(Color(0xFFE65100).copy(alpha = 0.15f), RoundedCornerShape(6.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Factory, contentDescription = null, tint = Color(0xFFE65100), modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(fac.factoryName, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                                Text(fac.factoryCode, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace, color = MasMuted)
+                            }
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(formatMoney(fac.totalValue), fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = MasInk, fontFamily = FontFamily.Monospace)
+                            Text("${formatQty(fac.totalQuantity)} Total Qty", fontSize = 10.5.sp, color = MasGreen, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Metrics row
+                    Surface(
+                        color = MasPaperSoft,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceAround
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Opening", fontSize = 9.5.sp, color = MasMuted)
+                                Text(formatQty(fac.openingStockQty), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MasBlue)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Purchases", fontSize = 9.5.sp, color = MasMuted)
+                                Text("+ ${formatQty(fac.purchasesQty)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MasGreen)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Sales", fontSize = 9.5.sp, color = MasMuted)
+                                Text("- ${formatQty(fac.salesQty)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MasRed)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Available", fontSize = 9.5.sp, color = MasMuted)
+                                Text(formatQty(fac.totalQuantity), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MasInk)
+                            }
+                        }
+                    }
+
+                    if (fac.items.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("${fac.items.size} Item(s) in Stock", fontSize = 11.sp, color = MasBlue, fontWeight = FontWeight.SemiBold)
+                            Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = MasBlue, modifier = Modifier.size(18.dp))
+                        }
+
+                        if (expanded) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                fac.items.forEach { itm ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(itm.itemName, fontSize = 11.sp, color = MasInk, modifier = Modifier.weight(1f))
+                                        Text(
+                                            "${formatQty(itm.quantity)} ${itm.unit} · ${formatMoney(itm.totalValue)}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun OpeningStockListView(
+    viewModel: MasViewModel,
+    records: List<OpeningStockRecord>,
+    partyAccounts: List<PartyAccount>
+) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editingRecord by remember { mutableStateOf<OpeningStockRecord?>(null) }
+
+    val totalOpQty = records.sumOf { it.openingQty }
+    val totalOpVal = records.sumOf { it.openingValue }
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 80.dp)
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MasPaperSoft),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Total Opening Stock Valuation", fontSize = 11.5.sp, color = MasMuted)
+                        Text(formatMoney(totalOpVal), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = MasInk, fontFamily = FontFamily.Monospace)
+                        Text("${formatQty(totalOpQty)} Total Units across ${records.size} records", fontSize = 10.5.sp, color = MasMuted)
+                    }
+                    Button(
+                        onClick = {
+                            editingRecord = null
+                            showAddDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MasRed),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Opening", fontSize = 11.5.sp)
+                    }
+                }
+            }
+        }
+
+        if (records.isEmpty()) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Inventory2, contentDescription = null, tint = MasMuted, modifier = Modifier.size(36.dp))
+                        Text("No Opening Stock Records", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Opening stock entries can be added manually or imported from Excel with factory accounts.", fontSize = 11.5.sp, color = MasMuted)
+                    }
+                }
+            }
+        }
+
+        items(records) { rec ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(rec.itemName, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                            Text("${rec.factoryName} (${rec.factoryId}) · ${rec.openingDate}", fontSize = 11.sp, color = MasMuted)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(formatMoney(rec.openingValue), fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = MasInk, fontFamily = FontFamily.Monospace)
+                            Text("${formatQty(rec.openingQty)} ${rec.unit} @ Rs ${rec.openingRate}", fontSize = 10.5.sp, color = MasBlue)
+                        }
+                    }
+
+                    if (rec.notes.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(rec.notes, fontSize = 10.5.sp, color = MasMuted)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        IconButton(
+                            onClick = {
+                                editingRecord = rec
+                                showAddDialog = true
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MasMuted, modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(
+                            onClick = { viewModel.deleteOpeningStockRecord(rec.id) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MasRed, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        AddOpeningStockDialog(
+            record = editingRecord,
+            partyAccounts = partyAccounts,
+            onSave = { newRec ->
+                viewModel.saveOpeningStockRecord(newRec, updateExisting = editingRecord != null)
+                showAddDialog = false
+            },
+            onDismiss = { showAddDialog = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddOpeningStockDialog(
+    record: OpeningStockRecord?,
+    partyAccounts: List<PartyAccount>,
+    onSave: (OpeningStockRecord) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val factories = partyAccounts.filter { it.accountType == PartyAccountType.Factory }
+    val defaultFactory = factories.firstOrNull()
+
+    var itemName by remember { mutableStateOf(record?.itemName ?: "") }
+    var selectedFactoryId by remember { mutableStateOf(record?.factoryId ?: defaultFactory?.code ?: "FAC-001") }
+    var selectedFactoryName by remember { mutableStateOf(record?.factoryName ?: defaultFactory?.name ?: "Factory") }
+    var qtyStr by remember { mutableStateOf(if (record != null && record.openingQty > 0) record.openingQty.toString() else "") }
+    var unit by remember { mutableStateOf(record?.unit ?: "Kg") }
+    var rateStr by remember { mutableStateOf(if (record != null && record.openingRate > 0) record.openingRate.toString() else "") }
+    var notes by remember { mutableStateOf(record?.notes ?: "") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(if (record != null) "Edit Opening Stock" else "Add Opening Stock", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = itemName,
+                    onValueChange = { itemName = it },
+                    label = { Text("Item / Material Name *", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                Text("Factory / Location:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MasMuted)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (factories.isEmpty()) {
+                        item {
+                            FilterChip(
+                                selected = true,
+                                onClick = {},
+                                label = { Text("FAC-001 Factory", fontSize = 10.5.sp) }
+                            )
+                        }
+                    } else {
+                        items(factories) { fac ->
+                            FilterChip(
+                                selected = selectedFactoryId == fac.code,
+                                onClick = {
+                                    selectedFactoryId = fac.code
+                                    selectedFactoryName = fac.name
+                                },
+                                label = { Text("${fac.code} - ${fac.name}", fontSize = 10.5.sp) }
+                            )
+                        }
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        value = qtyStr,
+                        onValueChange = { qtyStr = it },
+                        label = { Text("Opening Qty *", fontSize = 10.5.sp) },
+                        modifier = Modifier.weight(1.2f),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = unit,
+                        onValueChange = { unit = it },
+                        label = { Text("Unit", fontSize = 10.5.sp) },
+                        modifier = Modifier.weight(0.8f),
+                        singleLine = true
+                    )
+                }
+
+                OutlinedTextField(
+                    value = rateStr,
+                    onValueChange = { rateStr = it },
+                    label = { Text("Opening Cost Rate (Rs/Unit) *", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                val q = qtyStr.toDoubleOrNull() ?: 0.0
+                val r = rateStr.toDoubleOrNull() ?: 0.0
+                if (q > 0 && r > 0) {
+                    Surface(
+                        color = MasGreen.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Total Opening Value: ${formatMoney(q * r)} (Posts Dr Inventory / Cr Capital)",
+                            color = MasGreen,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Notes", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                errorMessage?.let {
+                    Text(it, color = MasRed, fontSize = 11.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (itemName.isBlank()) {
+                        errorMessage = "Item name is required"
+                        return@Button
+                    }
+                    val qty = qtyStr.toDoubleOrNull() ?: 0.0
+                    if (qty <= 0.0) {
+                        errorMessage = "Please enter a valid quantity"
+                        return@Button
+                    }
+                    val rate = rateStr.toDoubleOrNull() ?: 0.0
+                    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
+                    val newRec = OpeningStockRecord(
+                        id = record?.id ?: "OP-${System.currentTimeMillis() % 100000}",
+                        itemId = record?.itemId ?: "ITM-${System.currentTimeMillis() % 10000}",
+                        itemName = itemName.trim(),
+                        factoryId = selectedFactoryId,
+                        factoryName = selectedFactoryName,
+                        openingQty = qty,
+                        unit = unit.ifBlank { "Kg" },
+                        openingRate = rate,
+                        openingValue = qty * rate,
+                        openingDate = record?.openingDate ?: sdf,
+                        notes = notes.trim()
+                    )
+                    onSave(newRec)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MasRed)
+            ) {
+                Text(if (record != null) "Update" else "Save Opening", fontSize = 12.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", fontSize = 12.sp)
+            }
+        }
+    )
 }

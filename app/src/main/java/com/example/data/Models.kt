@@ -29,17 +29,35 @@ enum class PartyAccountType(
     CashInHand("Cash In Hand", "CASH", AccountType.Assets, "Debit", "Cash in Hand");
 
     companion object {
+        fun fromCodePrefix(code: String?): PartyAccountType? {
+            if (code.isNullOrBlank()) return null
+            val c = code.trim().uppercase()
+            return when {
+                c.startsWith("CUS") || c.startsWith("CUSTOMER") -> Customer
+                c.startsWith("SUP") || c.startsWith("SUPPLIER") || c.startsWith("VENDOR") -> Supplier
+                c.startsWith("OWN") || c.startsWith("OWNER") || c.startsWith("PROPRIETOR") -> Owner
+                c.startsWith("FAC") || c.startsWith("FACTORY") || c.startsWith("INVENTORY") -> Factory
+                c.startsWith("CASH") -> CashInHand
+                c.startsWith("INVESTOR") || c.startsWith("INS") || c.startsWith("INV") -> Investor
+                c.startsWith("LAB") || c.startsWith("LABOUR") || c.startsWith("EMPLOYEE") -> LabourEmployee
+                else -> null
+            }
+        }
+
         fun fromString(str: String?): PartyAccountType? {
             if (str.isNullOrBlank()) return null
             val s = str.trim()
+            val byPrefix = fromCodePrefix(s)
+            if (byPrefix != null) return byPrefix
+
             return when {
-                s.equals("Owner", ignoreCase = true) || s.startsWith("OWN", ignoreCase = true) || s.contains("Owner", ignoreCase = true) || s.contains("Proprietor", ignoreCase = true) || s.contains("Partner", ignoreCase = true) -> Owner
-                s.equals("Investor", ignoreCase = true) || s.startsWith("INS", ignoreCase = true) || s.startsWith("INV", ignoreCase = true) || s.contains("Investor", ignoreCase = true) || s.contains("Investment", ignoreCase = true) -> Investor
-                s.equals("Supplier", ignoreCase = true) || s.startsWith("SUP", ignoreCase = true) || s.contains("Supplier", ignoreCase = true) || s.contains("Vendor", ignoreCase = true) || s.contains("Creditor", ignoreCase = true) || s.contains("Seller", ignoreCase = true) || s.contains("Payable", ignoreCase = true) -> Supplier
-                s.equals("Factory", ignoreCase = true) || s.startsWith("FAC", ignoreCase = true) || s.contains("Factory", ignoreCase = true) || s.contains("Karkhana", ignoreCase = true) || s.contains("Mill", ignoreCase = true) || s.contains("Plant", ignoreCase = true) -> Factory
-                s.equals("Labour & Employee", ignoreCase = true) || s.startsWith("LAB", ignoreCase = true) || s.contains("Labour", ignoreCase = true) || s.contains("Labor", ignoreCase = true) || s.contains("Employee", ignoreCase = true) || s.contains("Worker", ignoreCase = true) || s.contains("Staff", ignoreCase = true) || s.contains("Salary", ignoreCase = true) -> LabourEmployee
-                s.equals("Customer", ignoreCase = true) || s.startsWith("CUS", ignoreCase = true) || s.contains("Customer", ignoreCase = true) || s.contains("Client", ignoreCase = true) || s.contains("Buyer", ignoreCase = true) || s.contains("Debtor", ignoreCase = true) -> Customer
-                s.equals("Cash In Hand", ignoreCase = true) || s.startsWith("CASH", ignoreCase = true) || s.contains("Cash In Hand", ignoreCase = true) || s.contains("Cash", ignoreCase = true) || s.contains("Cashier", ignoreCase = true) || s.contains("Till", ignoreCase = true) || s.contains("Petty", ignoreCase = true) -> CashInHand
+                s.contains("Owner", ignoreCase = true) || s.contains("Proprietor", ignoreCase = true) || s.contains("Partner", ignoreCase = true) || s.contains("Capital", ignoreCase = true) -> Owner
+                s.contains("Investor", ignoreCase = true) || s.contains("Investment", ignoreCase = true) -> Investor
+                s.contains("Supplier", ignoreCase = true) || s.contains("Vendor", ignoreCase = true) || s.contains("Creditor", ignoreCase = true) || s.contains("Seller", ignoreCase = true) || s.contains("Payable", ignoreCase = true) -> Supplier
+                s.contains("Factory", ignoreCase = true) || s.contains("Inventory", ignoreCase = true) || s.contains("Karkhana", ignoreCase = true) || s.contains("Mill", ignoreCase = true) || s.contains("Plant", ignoreCase = true) || s.contains("Stock", ignoreCase = true) || s.contains("Warehouse", ignoreCase = true) -> Factory
+                s.contains("Labour", ignoreCase = true) || s.contains("Labor", ignoreCase = true) || s.contains("Employee", ignoreCase = true) || s.contains("Worker", ignoreCase = true) || s.contains("Staff", ignoreCase = true) || s.contains("Salary", ignoreCase = true) -> LabourEmployee
+                s.contains("Customer", ignoreCase = true) || s.contains("Client", ignoreCase = true) || s.contains("Buyer", ignoreCase = true) || s.contains("Debtor", ignoreCase = true) -> Customer
+                s.contains("Cash In Hand", ignoreCase = true) || s.contains("Cash", ignoreCase = true) || s.contains("Cashier", ignoreCase = true) || s.contains("Till", ignoreCase = true) || s.contains("Petty", ignoreCase = true) -> CashInHand
                 else -> null
             }
         }
@@ -69,12 +87,18 @@ data class ImportedAccountRow(
     val resolvedType: PartyAccountType? = null,
     val openingBalance: Double = 0.0,
     val balanceType: String = "Debit", // Debit (Get/Dr) or Credit (Give/Cr)
+    val openingQty: Double = 0.0,
+    val unit: String = "Kg",
+    val openingRate: Double = 0.0,
+    val openingValue: Double = 0.0,
+    val hasOpeningStock: Boolean = false,
     val phone: String = "",
     val address: String = "",
     val notes: String = "",
-    val status: String = "Ready", // Ready, Duplicate, Invalid, Missing Name, Missing Category
+    val status: String = "Ready", // Ready, Duplicate, Invalid, Unknown Code Prefix, Missing Name
     val duplicateReason: String? = null,
-    val existingAccountId: String? = null
+    val existingAccountId: String? = null,
+    val prefixWarning: String? = null
 )
 
 enum class DuplicateStrategy(val label: String) {
@@ -461,6 +485,43 @@ data class CompanyProfile(
 // Double-Entry Ledger & Factory Stock Models
 // ============================================================================
 
+data class OpeningStockRecord(
+    val id: String,
+    val itemId: String = "",
+    val itemName: String,
+    val factoryId: String, // Factory account ID or Code e.g. "FAC-001"
+    val factoryName: String,
+    val openingQty: Double,
+    val unit: String = "Kg",
+    val openingRate: Double,
+    val openingValue: Double = openingQty * openingRate,
+    val openingDate: String,
+    val notes: String = "",
+    val journalEntryId: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class CashAccountBalance(
+    val id: String,
+    val code: String,
+    val name: String,
+    val kind: String = "Cash", // Cash or Bank
+    val openingBalance: Double = 0.0,
+    val totalDebit: Double = 0.0,
+    val totalCredit: Double = 0.0,
+    val currentBalance: Double = 0.0,
+    val status: String = "Active"
+)
+
+data class CloudSyncState(
+    val isOnline: Boolean = true,
+    val isSyncing: Boolean = false,
+    val lastSyncTime: String = "Just now",
+    val pendingChanges: Int = 0,
+    val cloudStatusMessage: String = "Cloud Synced & Persistent",
+    val companyId: String = "CMP-001"
+)
+
 data class AccountLedgerBalance(
     val accountCode: String,
     val accountName: String,
@@ -479,19 +540,33 @@ data class FactoryItemStock(
     val sku: String,
     val unit: String,
     val costPrice: Double,
-    val quantity: Double,
-    val totalValue: Double,
+    val openingQty: Double = 0.0,
+    val openingValue: Double = 0.0,
+    val purchasesQty: Double = 0.0,
+    val purchasesValue: Double = 0.0,
+    val salesQty: Double = 0.0,
+    val salesValue: Double = 0.0,
     val stockIn: Double = 0.0,
-    val stockOut: Double = 0.0
+    val stockOut: Double = 0.0,
+    val quantity: Double = 0.0,
+    val totalValue: Double = 0.0
 )
 
 data class FactoryStockRecord(
     val factoryId: String,
     val factoryName: String,
     val factoryCode: String,
-    val totalQuantity: Double,
-    val totalValue: Double,
-    val items: List<FactoryItemStock>
+    val openingStockQty: Double = 0.0,
+    val openingStockValue: Double = 0.0,
+    val purchasesQty: Double = 0.0,
+    val purchasesValue: Double = 0.0,
+    val salesQty: Double = 0.0,
+    val salesValue: Double = 0.0,
+    val totalStockIn: Double = 0.0,
+    val totalStockOut: Double = 0.0,
+    val totalQuantity: Double = 0.0,
+    val totalValue: Double = 0.0,
+    val items: List<FactoryItemStock> = emptyList()
 )
 
 data class DoubleEntryIntegrityCheck(

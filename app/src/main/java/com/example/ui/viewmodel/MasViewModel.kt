@@ -49,6 +49,12 @@ class MasViewModel : ViewModel() {
     val periodStatuses = MasRepository.periodStatuses
     val isFiscalYearClosed = MasRepository.isFiscalYearClosed
     val deletedRecords = MasRepository.deletedRecords
+    val openingStockRecords = MasRepository.openingStockRecords
+    val cloudSyncState = MasStorageManager.cloudSyncState
+
+    fun canModify(): Boolean = MasRepository.canModify()
+    fun isViewer(): Boolean = MasRepository.isViewer()
+    fun getCashAccountBalances(): List<CashAccountBalance> = MasRepository.getCashAccountBalances()
 
     // UI Feedback state
     private val _userMessage = MutableStateFlow<String?>(null)
@@ -972,6 +978,42 @@ class MasViewModel : ViewModel() {
     fun emptyDeletedRecords() {
         val count = MasRepository.emptyDeletedRecords()
         showMessage("Cleared $count items from Deleted Items folder.")
+    }
+
+    fun saveOpeningStockRecord(record: OpeningStockRecord, updateExisting: Boolean = false): Boolean {
+        val success = MasRepository.saveOpeningStockRecord(record, updateExisting)
+        if (success) {
+            showMessage("Opening stock for ${record.itemName} (${record.factoryName}) saved.")
+        }
+        return success
+    }
+
+    fun deleteOpeningStockRecord(id: String) {
+        val success = MasRepository.deleteOpeningStockRecord(id)
+        if (success) {
+            showMessage("Opening stock record moved to Deleted Items folder.")
+        }
+    }
+
+    fun addCashBankAccount(account: CashBankAccount) {
+        val current = MasRepository.cashBankAccounts.value.toMutableList()
+        current.add(account)
+        MasRepository.cashBankAccounts.value = current
+        MasStorageManager.saveToPersistentStorage()
+        showMessage("Account ${account.name} added successfully.")
+    }
+
+    fun addUser(user: AppUser) {
+        val current = MasRepository.users.value.toMutableList()
+        current.add(user)
+        MasRepository.users.value = current
+        MasStorageManager.saveToPersistentStorage()
+        showMessage("User ${user.name} (${user.role}) added successfully.")
+    }
+
+    fun triggerCloudSync() {
+        MasStorageManager.syncWithCloud()
+        showMessage("Cloud sync completed. All data persisted.")
     }
 
     fun importPartyAccounts(rows: List<ImportedAccountRow>, duplicateStrategy: DuplicateStrategy) {

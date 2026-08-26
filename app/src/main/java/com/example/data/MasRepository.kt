@@ -116,7 +116,17 @@ object MasRepository {
     ))
     val isFiscalYearClosed = MutableStateFlow(false)
     val partyAccounts = MutableStateFlow(emptyList<PartyAccount>())
+    val openingStockRecords = MutableStateFlow(emptyList<OpeningStockRecord>())
     val deletedRecords = MutableStateFlow<List<DeletedRecord>>(emptyList())
+
+    // Role check helper
+    fun canModify(): Boolean {
+        return currentUser.value.role.equals("Admin", ignoreCase = true)
+    }
+
+    fun isViewer(): Boolean {
+        return currentUser.value.role.equals("Viewer", ignoreCase = true)
+    }
 
     fun getNextPartyCode(type: PartyAccountType): String {
         val existingCodes = partyAccounts.value.map { it.code.trim().uppercase() }.toSet()
@@ -236,9 +246,31 @@ object MasRepository {
                 syncPartyToSubsystems(party)
                 importedCount++
             }
+
+            // If account has Opening Stock (e.g. Factory accounts or rows with opening qty/value)
+            if (row.hasOpeningStock || (type == PartyAccountType.Factory && (row.openingQty > 0.0 || row.openingValue > 0.0))) {
+                val opQty = if (row.openingQty > 0.0) row.openingQty else (if (row.openingValue > 0.0) 1.0 else 0.0)
+                val opRate = if (row.openingRate > 0.0) row.openingRate else (if (opQty > 0.0 && row.openingValue > 0.0) row.openingValue / opQty else 250.0)
+                val opVal = if (row.openingValue > 0.0) row.openingValue else (opQty * opRate)
+                val opRec = OpeningStockRecord(
+                    id = "OP-IMP-${party.code}-${System.currentTimeMillis() % 10000}",
+                    itemId = "ITM-${party.code}",
+                    itemName = "${party.name} Stock",
+                    factoryId = party.code,
+                    factoryName = party.name,
+                    openingQty = opQty,
+                    unit = row.unit.ifBlank { "Kg" },
+                    openingRate = opRate,
+                    openingValue = opVal,
+                    openingDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+                    notes = "Opening stock imported from Excel"
+                )
+                saveOpeningStockRecord(opRec, updateExisting = true)
+            }
         }
 
         partyAccounts.value = currentList
+        MasStorageManager.saveToPersistentStorage()
         logAudit("Parties", "Import", "EXCEL/CSV", "Imported $importedCount new, updated $updatedCount parties")
         return Pair(importedCount, updatedCount)
     }
@@ -779,42 +811,242 @@ object MasRepository {
         return true
     }
 
+    // Opening Stock Management
+    fun saveOpeningStockRecord(record: OpeningStockRecord, updateExisting: Boolean = false): Boolean {
+        val currentList = openingStockRecords.value.toMutableList()
+        val existingIndex = currentList.indexOfFirst { it.id == record.id }
+        val isNew = existingIndex < 0
+
+        val openingVal = if (record.openingValue > 0.0) record.openingValue else (record.openingQty * record.openingRate)
+        val finalRecord = record.copy(openingValue = openingVal)
+
+        if (isNew) {
+            currentList.add(finalRecord)
+        } else {
+            currentList[existingIndex] = finalRecord
+        }
+        openingStockRecords.value = currentList
+
+        // 1. Ensure or update StockItem
+        val existingItem = stockItems.value.find { it.name.equals(record.itemName, ignoreCase = true) || it.id == record.itemId }
+        val itemToUse = if (existingItem != null) {
+            val updated = existingItem.copy(
+                unit = record.unit,
+                costPrice = if (record.openingRate > 0.0) record.openingRate else existingItem.costPrice,
+                purchasePrice = if (record.openingRate > 0.0) record.openingRate else existingItem.purchasePrice
+            )
+            stockItems.value = stockItems.value.map { if (it.id == existingItem.id) updated else it }
+            updated
+        } else {
+            val newItem = StockItem(
+                id = "ITM-${System.currentTimeMillis() % 100000}-${(10..99).random()}",
+                sku = "SKU-${record.factoryId}-${record.itemName.take(4).uppercase()}",
+                name = record.itemName,
+                category = "Factory Inventory",
+                unit = record.unit,
+                purchasePrice = record.openingRate,
+                sellingPrice = record.openingRate * 1.25,
+                costPrice = record.openingRate,
+                minStock = 10.0
+            )
+            stockItems.value = stockItems.value + newItem
+            newItem
+        }
+
+        // 2. Post / update StockMove
+        val existingMove = stockMoves.value.find { it.reference == "Opening — ${record.id}" || (it.itemId == itemToUse.id && it.warehouseId == record.factoryId && it.type == "Opening") }
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val today = if (record.openingDate.isNotBlank()) record.openingDate else sdf.format(Date())
+
+        val move = StockMove(
+            id = existingMove?.id ?: "MOV-OP-${System.currentTimeMillis() % 100000}",
+            date = today,
+            itemId = itemToUse.id,
+            warehouseId = record.factoryId,
+            type = "Opening",
+            qty = record.openingQty,
+            unitCost = record.openingRate,
+            reference = "Opening — ${record.id}"
+        )
+        if (existingMove != null) {
+            stockMoves.value = stockMoves.value.map { if (it.id == existingMove.id) move else it }
+        } else {
+            stockMoves.value = stockMoves.value + move
+        }
+
+        // 3. Balanced Double-entry Journal Entry: Debit Inventory / Credit Owner Capital
+        val jeId = "JE-OP-STK-${record.id}"
+        journal.value = journal.value.filterNot { it.id == jeId }
+        if (openingVal > 0.0) {
+            postJournalEntry(
+                JournalEntry(
+                    id = jeId,
+                    date = today,
+                    source = "Opening Stock",
+                    description = "Opening Stock — ${record.itemName} (${record.factoryName})",
+                    reference = record.id,
+                    lines = listOf(
+                        JournalLine("Inventory", openingVal, 0.0, warehouseId = record.factoryId),
+                        JournalLine("Owner Capital", 0.0, openingVal)
+                    )
+                )
+            )
+        }
+
+        logAudit("Inventory", if (isNew) "Create Opening" else "Update Opening", record.id, "${record.openingQty} ${record.unit} of ${record.itemName} at ${record.factoryName} (Rs $openingVal)")
+        MasStorageManager.saveToPersistentStorage()
+        return true
+    }
+
+    fun deleteOpeningStockRecord(id: String): Boolean {
+        val rec = openingStockRecords.value.find { it.id == id } ?: return false
+        openingStockRecords.value = openingStockRecords.value.filterNot { it.id == id }
+        journal.value = journal.value.filterNot { it.id == "JE-OP-STK-$id" || it.reference == id }
+        stockMoves.value = stockMoves.value.filterNot { it.reference == "Opening — $id" }
+
+        val deleted = DeletedRecord(
+            id = "DEL-${System.currentTimeMillis()}-${(100..999).random()}",
+            itemType = "Opening Stock",
+            itemCode = rec.id,
+            title = "Opening Stock: ${rec.itemName}",
+            subtitle = "${rec.factoryName} · ${rec.openingQty} ${rec.unit} @ Rs ${rec.openingRate}",
+            amount = rec.openingValue,
+            originalPayload = rec
+        )
+        deletedRecords.value = listOf(deleted) + deletedRecords.value
+        logAudit("Inventory", "Delete Opening", id, "Deleted opening stock of ${rec.itemName} from ${rec.factoryName}")
+        MasStorageManager.saveToPersistentStorage()
+        return true
+    }
+
+    // Multiple Cash In Hand Accounts calculation
+    fun getCashAccountBalances(): List<CashAccountBalance> {
+        val cashAccounts = cashBankAccounts.value.filter { it.kind.equals("Cash", ignoreCase = true) }
+        val txns = cashBankTxns.value
+
+        return cashAccounts.map { acc ->
+            val accTxns = txns.filter { it.accountId == acc.id || it.accountId == acc.name || it.fromAccountId == acc.id || it.toAccountId == acc.id }
+            val debits = accTxns.filter { it.type == "Receipt" || it.toAccountId == acc.id }.sumOf { it.amount }
+            val credits = accTxns.filter { it.type == "Payment" || it.fromAccountId == acc.id }.sumOf { it.amount }
+            val currentBal = acc.openingBalance + debits - credits
+
+            CashAccountBalance(
+                id = acc.id,
+                code = acc.id,
+                name = acc.name,
+                kind = "Cash",
+                openingBalance = acc.openingBalance,
+                totalDebit = debits,
+                totalCredit = credits,
+                currentBalance = currentBal,
+                status = "Active"
+            )
+        }
+    }
+
     // Factory Stock Synchronization
     fun getFactoryStockRecords(): List<FactoryStockRecord> {
         val factoryParties = partyAccounts.value.filter { it.accountType == PartyAccountType.Factory }
         val allItems = stockItems.value
         val moves = stockMoves.value
+        val opRecords = openingStockRecords.value
 
         return factoryParties.map { factory ->
             val factoryLocIds = setOf(factory.code, factory.name, factory.id)
-            val itemStocks = allItems.mapNotNull { item ->
-                val factoryMoves = moves.filter { it.itemId == item.id && it.warehouseId in factoryLocIds }
-                val stockIn = factoryMoves.filter { it.type in listOf("In", "Opening", "Transfer In", "Adjustment +") }.sumOf { it.qty }
-                val stockOut = factoryMoves.filter { it.type in listOf("Out", "Transfer Out", "Adjustment -") }.sumOf { it.qty }
-                val currentQty = stockIn - stockOut
+            
+            val factoryOpRecs = opRecords.filter { it.factoryId in factoryLocIds || it.factoryName.equals(factory.name, ignoreCase = true) }
+            val opStockQty = factoryOpRecs.sumOf { it.openingQty }
+            val opStockVal = factoryOpRecs.sumOf { it.openingValue }
 
-                if (currentQty != 0.0 || stockIn > 0.0 || stockOut > 0.0) {
+            val factoryMoves = moves.filter { it.warehouseId in factoryLocIds || (it.warehouseId != null && it.warehouseId.contains(factory.code, ignoreCase = true)) }
+            val purchasesQty = factoryMoves.filter { it.type == "In" || it.reference.contains("Purchase", ignoreCase = true) }.sumOf { it.qty }
+            val purchasesVal = factoryMoves.filter { it.type == "In" || it.reference.contains("Purchase", ignoreCase = true) }.sumOf { it.qty * (it.unitCost ?: 0.0) }
+            val salesQty = factoryMoves.filter { it.type == "Out" || it.reference.contains("Sale", ignoreCase = true) }.sumOf { it.qty }
+            val salesVal = factoryMoves.filter { it.type == "Out" || it.reference.contains("Sale", ignoreCase = true) }.sumOf { it.qty * (it.unitCost ?: 0.0) }
+
+            val stockIn = factoryMoves.filter { it.type in listOf("In", "Opening", "Transfer In", "Adjustment +") }.sumOf { it.qty }
+            val stockOut = factoryMoves.filter { it.type in listOf("Out", "Transfer Out", "Adjustment -") }.sumOf { it.qty }
+
+            val itemStocks = mutableListOf<FactoryItemStock>()
+
+            // 1. Items from opening stock
+            factoryOpRecs.forEach { op ->
+                val itmMoves = factoryMoves.filter { it.reference.contains(op.id) || it.itemId == op.itemId }
+                val itmPurchases = itmMoves.filter { it.type == "In" }.sumOf { it.qty }
+                val itmSales = itmMoves.filter { it.type == "Out" }.sumOf { it.qty }
+                val curQty = (op.openingQty + itmPurchases - itmSales).coerceAtLeast(0.0)
+                itemStocks.add(
                     FactoryItemStock(
-                        itemId = item.id,
-                        itemName = item.name,
-                        sku = item.sku,
-                        unit = item.unit,
-                        costPrice = item.costPrice,
-                        quantity = currentQty,
-                        totalValue = currentQty * item.costPrice,
-                        stockIn = stockIn,
-                        stockOut = stockOut
+                        itemId = op.itemId.ifBlank { op.id },
+                        itemName = op.itemName,
+                        sku = "SKU-${factory.code}",
+                        unit = op.unit,
+                        costPrice = op.openingRate,
+                        openingQty = op.openingQty,
+                        openingValue = op.openingValue,
+                        purchasesQty = itmPurchases,
+                        purchasesValue = itmPurchases * op.openingRate,
+                        salesQty = itmSales,
+                        salesValue = itmSales * op.openingRate,
+                        stockIn = op.openingQty + itmPurchases,
+                        stockOut = itmSales,
+                        quantity = curQty,
+                        totalValue = curQty * op.openingRate
                     )
-                } else null
+                )
             }
 
-            val totalQty = itemStocks.sumOf { it.quantity }
-            val totalVal = itemStocks.sumOf { it.totalValue }
+            // 2. Additional items from general moves
+            allItems.forEach { item ->
+                if (itemStocks.none { it.itemName.equals(item.name, ignoreCase = true) }) {
+                    val itmMoves = factoryMoves.filter { it.itemId == item.id }
+                    if (itmMoves.isNotEmpty()) {
+                        val itmIn = itmMoves.filter { it.type in listOf("In", "Opening", "Transfer In", "Adjustment +") }.sumOf { it.qty }
+                        val itmOut = itmMoves.filter { it.type in listOf("Out", "Transfer Out", "Adjustment -") }.sumOf { it.qty }
+                        val curQty = (itmIn - itmOut).coerceAtLeast(0.0)
+                        if (itmIn > 0.0 || itmOut > 0.0 || curQty > 0.0) {
+                            val opQty = itmMoves.filter { it.type == "Opening" }.sumOf { it.qty }
+                            val purQty = itmMoves.filter { it.type == "In" }.sumOf { it.qty }
+                            val salQty = itmMoves.filter { it.type == "Out" }.sumOf { it.qty }
+                            itemStocks.add(
+                                FactoryItemStock(
+                                    itemId = item.id,
+                                    itemName = item.name,
+                                    sku = item.sku,
+                                    unit = item.unit,
+                                    costPrice = item.costPrice,
+                                    openingQty = opQty,
+                                    openingValue = opQty * item.costPrice,
+                                    purchasesQty = purQty,
+                                    purchasesValue = purQty * item.costPrice,
+                                    salesQty = salQty,
+                                    salesValue = salQty * item.costPrice,
+                                    stockIn = itmIn,
+                                    stockOut = itmOut,
+                                    quantity = curQty,
+                                    totalValue = curQty * item.costPrice
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            val totalQty = if (itemStocks.isNotEmpty()) itemStocks.sumOf { it.quantity } else (opStockQty + purchasesQty - salesQty).coerceAtLeast(0.0)
+            val totalVal = if (itemStocks.isNotEmpty()) itemStocks.sumOf { it.totalValue } else (totalQty * 280.0)
 
             FactoryStockRecord(
                 factoryId = factory.id,
                 factoryName = factory.name,
                 factoryCode = factory.code,
+                openingStockQty = opStockQty,
+                openingStockValue = opStockVal,
+                purchasesQty = purchasesQty,
+                purchasesValue = purchasesVal,
+                salesQty = salesQty,
+                salesValue = salesVal,
+                totalStockIn = stockIn,
+                totalStockOut = stockOut,
                 totalQuantity = totalQty,
                 totalValue = totalVal,
                 items = itemStocks

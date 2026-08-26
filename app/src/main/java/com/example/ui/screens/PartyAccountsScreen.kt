@@ -28,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.text.SimpleDateFormat
+import java.util.*
 import com.example.data.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
@@ -600,6 +602,10 @@ fun AddEditPartyAccountDialog(
     var address by remember { mutableStateOf(account?.address ?: "") }
     var notes by remember { mutableStateOf(account?.notes ?: "") }
 
+    var openingStockQty by remember { mutableStateOf("") }
+    var openingStockUnit by remember { mutableStateOf("Kg") }
+    var openingStockRate by remember { mutableStateOf("") }
+
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // When type changes and not editing existing code, auto-update code
@@ -703,6 +709,54 @@ fun AddEditPartyAccountDialog(
                     }
                 }
 
+                // If Factory Account, show Opening Stock fields
+                if (selectedType == PartyAccountType.Factory) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MasAmber.copy(alpha = 0.08f)),
+                            border = BorderStroke(1.dp, MasAmber.copy(alpha = 0.3f)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Factory Opening Stock (Optional)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MasAmber)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedTextField(
+                                        value = openingStockQty,
+                                        onValueChange = {
+                                            openingStockQty = it
+                                            val q = it.toDoubleOrNull() ?: 0.0
+                                            val r = openingStockRate.toDoubleOrNull() ?: 0.0
+                                            if (q > 0 && r > 0) openingStr = (q * r).toInt().toString()
+                                        },
+                                        label = { Text("Opening Qty", fontSize = 10.5.sp) },
+                                        modifier = Modifier.weight(1f),
+                                        singleLine = true
+                                    )
+                                    OutlinedTextField(
+                                        value = openingStockUnit,
+                                        onValueChange = { openingStockUnit = it },
+                                        label = { Text("Unit (Kg/Bag)", fontSize = 10.5.sp) },
+                                        modifier = Modifier.weight(0.9f),
+                                        singleLine = true
+                                    )
+                                    OutlinedTextField(
+                                        value = openingStockRate,
+                                        onValueChange = {
+                                            openingStockRate = it
+                                            val q = openingStockQty.toDoubleOrNull() ?: 0.0
+                                            val r = it.toDoubleOrNull() ?: 0.0
+                                            if (q > 0 && r > 0) openingStr = (q * r).toInt().toString()
+                                        },
+                                        label = { Text("Rate (Rs)", fontSize = 10.5.sp) },
+                                        modifier = Modifier.weight(1f),
+                                        singleLine = true
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 item {
                     OutlinedTextField(
                         value = phone,
@@ -763,6 +817,25 @@ fun AddEditPartyAccountDialog(
 
                     val saved = viewModel.savePartyAccount(party, updateExisting = isEdit)
                     if (saved) {
+                        val opQ = openingStockQty.toDoubleOrNull() ?: 0.0
+                        val opR = openingStockRate.toDoubleOrNull() ?: 0.0
+                        if (selectedType == PartyAccountType.Factory && (opQ > 0.0 || opR > 0.0)) {
+                            val opVal = if (opQ > 0 && opR > 0) opQ * opR else openingAmount
+                            val opRec = OpeningStockRecord(
+                                id = "OP-${party.code}-${System.currentTimeMillis() % 10000}",
+                                itemId = "ITM-${party.code}",
+                                itemName = "${party.name} Stock",
+                                factoryId = party.code,
+                                factoryName = party.name,
+                                openingQty = if (opQ > 0) opQ else 1.0,
+                                unit = openingStockUnit.ifBlank { "Kg" },
+                                openingRate = if (opR > 0) opR else (if (opQ > 0) opVal / opQ else 250.0),
+                                openingValue = opVal,
+                                openingDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+                                notes = "Manual factory opening stock"
+                            )
+                            viewModel.saveOpeningStockRecord(opRec, updateExisting = true)
+                        }
                         onDismiss()
                     } else {
                         errorMessage = "Account with code or name already exists in ${selectedType.displayName}."
@@ -950,6 +1023,26 @@ fun ImportPreviewDialog(
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = 10.5.sp,
                                         color = if (row.balanceType == "Debit") MasGreen else MasRed
+                                    )
+                                }
+
+                                if (row.hasOpeningStock || row.openingQty > 0.0) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "📦 Opening Stock: ${row.openingQty} ${row.unit.ifBlank { "Kg" }} @ Rs ${row.openingRate} (Val: Rs ${row.openingValue})",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MasAmber
+                                    )
+                                }
+
+                                if (row.prefixWarning != null) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "⚠️ ${row.prefixWarning}",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (row.resolvedType == null) MasRed else MasAmber
                                     )
                                 }
 

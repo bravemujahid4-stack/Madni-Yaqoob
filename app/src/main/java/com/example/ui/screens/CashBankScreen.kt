@@ -34,6 +34,8 @@ fun CashBankScreen(viewModel: MasViewModel) {
     val cashInHand by viewModel.cashInHand.collectAsState()
     val bankBalance by viewModel.bankBalance.collectAsState()
 
+    var showAddAccountDialog by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -41,7 +43,18 @@ fun CashBankScreen(viewModel: MasViewModel) {
     ) {
         SectionHeader(
             title = "Cash & Bank Management",
-            subtitle = "Cash in hand, petty cash, bank accounts, fund transfers & reconciliations."
+            subtitle = "Multiple Cash in Hand accounts, petty cash, bank accounts & transfers.",
+            actionButton = {
+                Button(
+                    onClick = { showAddAccountDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = MasRed),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add Account", fontSize = 12.sp)
+                }
+            }
         )
 
         LazyRow(
@@ -62,7 +75,119 @@ fun CashBankScreen(viewModel: MasViewModel) {
             "ledger" -> CashBankLedgerView(accounts, txns)
             "reconcile" -> BankReconciliationView(accounts, txns)
         }
+
+        if (showAddAccountDialog) {
+            AddCashBankAccountDialog(
+                onSave = { newAcc ->
+                    viewModel.addCashBankAccount(newAcc)
+                    showAddAccountDialog = false
+                },
+                onDismiss = { showAddAccountDialog = false }
+            )
+        }
     }
+}
+
+@Composable
+fun AddCashBankAccountDialog(
+    onSave: (CashBankAccount) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var kind by remember { mutableStateOf("Cash") } // Cash, Bank
+    var name by remember { mutableStateOf("") }
+    var openingStr by remember { mutableStateOf("0") }
+    var bankName by remember { mutableStateOf("") }
+    var accountNumber by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Add Cash / Bank Account", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(
+                        selected = kind == "Cash",
+                        onClick = { kind = "Cash" },
+                        label = { Text("Cash In Hand", fontSize = 11.sp) }
+                    )
+                    FilterChip(
+                        selected = kind == "Bank",
+                        onClick = { kind = "Bank" },
+                        label = { Text("Bank Account", fontSize = 11.sp) }
+                    )
+                }
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Account Name (e.g. Factory Floor Cash, Main Cash)", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = openingStr,
+                    onValueChange = { openingStr = it },
+                    label = { Text("Opening Balance (Rs)", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                if (kind == "Bank") {
+                    OutlinedTextField(
+                        value = bankName,
+                        onValueChange = { bankName = it },
+                        label = { Text("Bank Name (e.g. Meezan Bank, HBL)", fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = accountNumber,
+                        onValueChange = { accountNumber = it },
+                        label = { Text("Account Number / IBAN", fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+
+                errorMessage?.let {
+                    Text(it, color = MasRed, fontSize = 11.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isBlank()) {
+                        errorMessage = "Account name is required"
+                        return@Button
+                    }
+                    val opening = openingStr.toDoubleOrNull() ?: 0.0
+                    val accId = if (kind == "Cash") "CASH-${System.currentTimeMillis() % 10000}" else "BNK-${System.currentTimeMillis() % 10000}"
+                    val newAcc = CashBankAccount(
+                        id = accId,
+                        name = name.trim(),
+                        kind = kind,
+                        openingBalance = opening,
+                        bankName = if (kind == "Bank") bankName.trim() else null,
+                        accountNumber = if (kind == "Bank") accountNumber.trim() else null
+                    )
+                    onSave(newAcc)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MasRed)
+            ) {
+                Text("Save Account", fontSize = 12.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", fontSize = 12.sp)
+            }
+        }
+    )
 }
 
 @Composable
