@@ -743,6 +743,149 @@ object MasRepository {
         return false
     }
 
+    private fun matchesParty(lineAccount: String, party: PartyAccount): Boolean {
+        if (lineAccount.equals(party.name, ignoreCase = true)) return true
+        if (lineAccount.equals(party.code, ignoreCase = true)) return true
+        if (lineAccount.startsWith("${party.name} (", ignoreCase = true)) return true
+        if (lineAccount.contains(party.code, ignoreCase = true)) return true
+        return false
+    }
+
+    // Party Account Ledger Balance Calculation (Factory, Customer, Supplier, Owner, etc.)
+    fun getPartyLedgerBalance(party: PartyAccount): AccountLedgerBalance {
+        val name = party.name.trim()
+        val code = party.code.trim()
+
+        val isNormalDebit = party.balanceType.equals("Debit", ignoreCase = true) ||
+                            party.balanceType.equals("Dr", ignoreCase = true) ||
+                            party.balanceType.contains("Get", ignoreCase = true)
+
+        val opening = party.openingBalance
+        val openingDr = if (isNormalDebit) opening else 0.0
+        val openingCr = if (!isNormalDebit) opening else 0.0
+
+        var glDr = 0.0
+        var glCr = 0.0
+
+        val postedEntries = journal.value.filter { it.status == "Posted" }
+        postedEntries.forEach { entry ->
+            entry.lines.forEach { line ->
+                if (matchesParty(line.account, party) ||
+                    (line.warehouseId != null && (line.warehouseId.equals(code, ignoreCase = true) || line.warehouseId.equals(name, ignoreCase = true) || line.warehouseId.equals(party.id, ignoreCase = true)))) {
+                    glDr += line.debit
+                    glCr += line.credit
+                }
+            }
+        }
+
+        // Cash / Bank Txns where contraAccount or description or accountId matches
+        val txns = cashBankTxns.value
+        txns.forEach { txn ->
+            val isTarget = txn.contraAccount.equals(name, ignoreCase = true) ||
+                           txn.contraAccount.equals(code, ignoreCase = true) ||
+                           txn.accountId.equals(code, ignoreCase = true) ||
+                           txn.accountId.equals(name, ignoreCase = true) ||
+                           txn.description.contains(name, ignoreCase = true) ||
+                           txn.description.contains(code, ignoreCase = true)
+            if (isTarget) {
+                val hasJe = postedEntries.any { it.reference == txn.id || it.reference == txn.reference }
+                if (!hasJe) {
+                    if (txn.type == "Payment") {
+                        glDr += txn.amount
+                    } else if (txn.type == "Receipt") {
+                        glCr += txn.amount
+                    }
+                }
+            }
+        }
+
+        // Subsystem documents for Customer
+        if (party.accountType == PartyAccountType.Customer) {
+            val creditInvoices = salesDocs.value.filter {
+                (it.customerId.equals(code, ignoreCase = true) || it.customerId.equals(name, ignoreCase = true)) &&
+                it.type == "Sales Invoice" && it.status == "Posted" && it.saleType != "Cash" &&
+                postedEntries.none { je -> je.reference == it.id }
+            }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+            val returns = salesDocs.value.filter {
+                (it.customerId.equals(code, ignoreCase = true) || it.customerId.equals(name, ignoreCase = true)) &&
+                it.type == "Sales Return" &&
+                postedEntries.none { je -> je.reference == it.id }
+            }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+            val receipts = salesDocs.value.filter {
+                (it.customerId.equals(code, ignoreCase = true) || it.customerId.equals(name, ignoreCase = true)) &&
+                it.type == "Customer Payment" &&
+                postedEntries.none { je -> je.reference == it.id }
+            }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+            glDr += creditInvoices
+            glCr += (returns + receipts)
+        }
+
+        // Subsystem documents for Supplier
+        if (party.accountType == PartyAccountType.Supplier) {
+            val creditBills = purchaseDocs.value.filter {
+                (it.supplierId.equals(code, ignoreCase = true) || it.supplierId.equals(name, ignoreCase = true)) &&
+                it.type == "Purchase Bill" && it.status == "Posted" && it.saleType != "Cash" &&
+                postedEntries.none { je -> je.reference == it.id }
+            }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+            val returns = purchaseDocs.value.filter {
+                (it.supplierId.equals(code, ignoreCase = true) || it.supplierId.equals(name, ignoreCase = true)) &&
+                it.type == "Purchase Return" &&
+                postedEntries.none { je -> je.reference == it.id }
+            }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+            val payments = purchaseDocs.value.filter {
+                (it.supplierId.equals(code, ignoreCase = true) || it.supplierId.equals(name, ignoreCase = true)) &&
+                it.type == "Supplier Payment" &&
+                postedEntries.none { je -> je.reference == it.id }
+            }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+            glCr += creditBills
+            glDr += (returns + payments)
+        }
+
+        val totalDr = openingDr + glDr
+        val totalCr = openingCr + glCr
+        val netAmount = totalDr - totalCr
+
+        val indicator = if (netAmount >= 0.0) "Dr" else "Cr"
+
+        return AccountLedgerBalance(
+            accountCode = party.code,
+            accountName = party.name,
+            accountType = party.accountType.displayName,
+            normalNature = if (isNormalDebit) "Debit" else "Credit",
+            openingBalance = party.openingBalance,
+            totalDebit = totalDr,
+            totalCredit = totalCr,
+            currentBalance = Math.abs(netAmount),
+            drCrIndicator = indicator
+        )
+    }
+
+    // Factory Accounts Ledger Summary
+    fun getFactoryAccountsLedgerBalances(): List<AccountLedgerBalance> {
+        val factoryParties = partyAccounts.value.filter { it.accountType == PartyAccountType.Factory }
+        return factoryParties.map { getPartyLedgerBalance(it) }
+    }
+
+    // Total Factory Receivable (Dr): sum of all Factory accounts having Dr balances
+    fun getFactoryReceivableTotal(): Double {
+        return getFactoryAccountsLedgerBalances()
+            .filter { it.drCrIndicator == "Dr" && it.currentBalance > 0.001 }
+            .sumOf { it.currentBalance }
+    }
+
+    // Total Factory Profit (Cr): sum of all Factory accounts having Cr balances
+    fun getFactoryProfitTotal(): Double {
+        return getFactoryAccountsLedgerBalances()
+            .filter { it.drCrIndicator == "Cr" && it.currentBalance > 0.001 }
+            .sumOf { it.currentBalance }
+    }
+
     // Double-Entry Integrity Check across ALL accounts combined in the complete ledger
     fun checkDoubleEntryIntegrity(): DoubleEntryIntegrityCheck {
         val postedEntries = journal.value.filter { it.status == "Posted" }
@@ -780,9 +923,9 @@ object MasRepository {
         // Party opening balances not already in COA
         partyList.forEach { party ->
             if (systemAccounts.none { it.code.equals(party.code, ignoreCase = true) }) {
-                if (party.balanceType.equals("Debit", ignoreCase = true) || party.balanceType.equals("Dr", ignoreCase = true)) {
+                if (party.balanceType.equals("Debit", ignoreCase = true) || party.balanceType.equals("Dr", ignoreCase = true) || party.balanceType.contains("Get", ignoreCase = true)) {
                     openingDr += party.openingBalance
-                } else if (party.balanceType.equals("Credit", ignoreCase = true) || party.balanceType.equals("Cr", ignoreCase = true)) {
+                } else if (party.balanceType.equals("Credit", ignoreCase = true) || party.balanceType.equals("Cr", ignoreCase = true) || party.balanceType.contains("Give", ignoreCase = true)) {
                     openingCr += party.openingBalance
                 }
             }

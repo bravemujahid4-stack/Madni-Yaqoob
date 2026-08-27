@@ -43,6 +43,8 @@ fun DashboardScreen(
     val totalPayable by viewModel.totalPayable.collectAsState()
     val munawarCash by viewModel.munawarCash.collectAsState()
     val khalidCash by viewModel.khalidCash.collectAsState()
+    val totalFactoryReceivable by viewModel.totalFactoryReceivable.collectAsState()
+    val totalFactoryProfit by viewModel.totalFactoryProfit.collectAsState()
     val bankBalance by viewModel.bankBalance.collectAsState()
     val totalExpenses by viewModel.totalExpenses.collectAsState()
     val netProfit = totalSales - totalPurchases - totalExpenses
@@ -226,7 +228,26 @@ fun DashboardScreen(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                // Row 3: Cash in Hand (Munawar) & Cash in Hand (Khalid)
+                // Row 3: Factory Receivable (Dr) & Factory Profit (Cr)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatCard(
+                        label = "Factory Receivable",
+                        value = "${formatMoney(totalFactoryReceivable)} Dr",
+                        icon = Icons.Default.PrecisionManufacturing,
+                        tone = MasGreen,
+                        sub = "Factory due (Dr)",
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatCard(
+                        label = "Factory Profit",
+                        value = "${formatMoney(totalFactoryProfit)} Cr",
+                        icon = Icons.Default.MonetizationOn,
+                        tone = MasBlue,
+                        sub = "Factory profit (Cr)",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                // Row 4: Cash in Hand (Munawar) & Cash in Hand (Khalid)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val munDrCr = if (munawarCash > 0) "Dr" else if (munawarCash < 0) "Cr" else ""
                     val munTone = if (munawarCash >= 0) MasGreen else MasRed
@@ -249,7 +270,7 @@ fun DashboardScreen(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                // Row 4: Bank Balance & Net Profit
+                // Row 5: Bank Balance & Net Profit
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val bankDrCr = if (bankBalance > 0) "Dr" else if (bankBalance < 0) "Cr" else ""
                     val bankTone = if (bankBalance >= 0) MasBlue else MasRed
@@ -264,13 +285,13 @@ fun DashboardScreen(
                     StatCard(
                         label = "Net Profit",
                         value = formatMoney(netProfit),
-                        icon = Icons.Default.MonetizationOn,
+                        icon = Icons.Default.TrendingUp,
                         tone = if (netProfit >= 0) MasGreen else MasRed,
                         sub = "Sales - Buy - Exp",
                         modifier = Modifier.weight(1f)
                     )
                 }
-                // Row 5: Stock Inventory Value
+                // Row 6: Stock Inventory Value
                 Row(modifier = Modifier.fillMaxWidth()) {
                     StatCard(
                         label = "Inventory Value",
@@ -365,8 +386,11 @@ fun DashboardScreen(
             }
         }
 
-        // Factory Stock & Inventory Locations Card
+        // Factory Accounts & Stock Summary Card (Double-Entry Ledger & Inventory)
         item {
+            val factoryBalances = remember(partyAccounts, journal, cashBankTxns) {
+                viewModel.getFactoryAccountsLedgerBalances()
+            }
             val factoryRecords = remember(viewModel.stockMoves, viewModel.stockItems, viewModel.partyAccounts) {
                 viewModel.getFactoryStockRecords()
             }
@@ -382,55 +406,118 @@ fun DashboardScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.PrecisionManufacturing, contentDescription = "Factory Stock", tint = MasAmber, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.PrecisionManufacturing, contentDescription = "Factory Accounts", tint = MasAmber, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Factory Stock & Locations",
+                                text = "Factory Accounts & Stock Summary",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.5.sp
                             )
                         }
-                        TextButton(onClick = { onNavigateToModule("step9") }) {
-                            Text("Inventory", color = MasRed, fontSize = 11.sp)
+                        TextButton(onClick = { onNavigateToModule("step1") }) {
+                            Text("Parties", color = MasRed, fontSize = 11.sp)
                         }
                     }
                     Text(
-                        text = "Synchronized with inventory stock ledger without valuation duplication",
+                        text = "Debit balance = Factory Receivable · Credit balance = Factory Profit",
                         fontSize = 10.5.sp,
                         color = MasMuted
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Separate Totals Banner
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("Total Factory Receivable (Dr)", fontSize = 10.5.sp, color = MasMuted)
+                                Text(
+                                    "${formatMoney(totalFactoryReceivable)} Dr",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MasGreen,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("Total Factory Profit (Cr)", fontSize = 10.5.sp, color = MasMuted)
+                                Text(
+                                    "${formatMoney(totalFactoryProfit)} Cr",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MasBlue,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    if (factoryRecords.isEmpty()) {
-                        Text("No factory locations with stock found. Add a Factory account in Party Accounts.", fontSize = 11.5.sp, color = MasMuted)
+                    val factoryPartiesList = partyAccounts.filter { it.accountType == PartyAccountType.Factory }
+                    if (factoryPartiesList.isEmpty() && factoryRecords.isEmpty()) {
+                        Text("No factory accounts found. Add a Factory account in Party Accounts.", fontSize = 11.5.sp, color = MasMuted)
                     } else {
-                        factoryRecords.forEach { fRec ->
+                        factoryPartiesList.forEach { fParty ->
+                            val bal = factoryBalances.find { it.accountCode.equals(fParty.code, ignoreCase = true) || it.accountName.equals(fParty.name, ignoreCase = true) }
+                            val fRec = factoryRecords.find { it.factoryCode.equals(fParty.code, ignoreCase = true) || it.factoryName.equals(fParty.name, ignoreCase = true) }
+                            val isDr = bal?.drCrIndicator == "Dr"
+                            val isZero = (bal?.currentBalance ?: 0.0) < 0.001
+
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 6.dp)
+                                    .padding(vertical = 8.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column {
-                                        Text(fRec.factoryName, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
-                                        Text("Code: ${fRec.factoryCode} · ${fRec.items.size} item(s)", color = MasMuted, fontSize = 10.5.sp)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(fParty.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                color = if (isZero) MaterialTheme.colorScheme.surfaceVariant else if (isDr) MasGreen.copy(alpha = 0.15f) else MasBlue.copy(alpha = 0.15f),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (isZero) "Settled" else if (isDr) "Receivable (Dr)" else "Profit (Cr)",
+                                                    fontSize = 9.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isZero) MasMuted else if (isDr) MasGreen else MasBlue,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "Code: ${fParty.code}${if (fRec != null && fRec.totalQuantity > 0) " · Stock: ${fRec.totalQuantity.toInt()} units" else ""}",
+                                            color = MasMuted,
+                                            fontSize = 11.sp
+                                        )
                                     }
                                     Column(horizontalAlignment = Alignment.End) {
                                         Text(
-                                            formatMoney(fRec.totalValue),
+                                            text = "${formatMoney(bal?.currentBalance ?: 0.0)} ${bal?.drCrIndicator ?: "Dr"}",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 12.5.sp,
-                                            color = MasAmber,
+                                            fontSize = 13.sp,
+                                            color = if (isDr) MasGreen else MasBlue,
                                             fontFamily = FontFamily.Monospace
                                         )
-                                        Text("${fRec.totalQuantity.toInt()} units total", fontSize = 10.sp, color = MasMuted)
+                                        Text(
+                                            text = if (isDr) "Factory Receivable" else "Factory Profit",
+                                            fontSize = 10.sp,
+                                            color = MasMuted
+                                        )
                                     }
                                 }
-                                if (fRec.items.isNotEmpty()) {
+                                if (fRec != null && fRec.items.isNotEmpty()) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),

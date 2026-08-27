@@ -134,6 +134,16 @@ class MasViewModel : ViewModel() {
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
+    // Total Factory Receivable (Dr): sum of all Factory accounts having Dr balances
+    val totalFactoryReceivable = combine(partyAccounts, journal, cashBankTxns) { _, _, _ ->
+        MasRepository.getFactoryReceivableTotal()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
+    // Total Factory Profit (Cr): sum of all Factory accounts having Cr balances
+    val totalFactoryProfit = combine(partyAccounts, journal, cashBankTxns) { _, _, _ ->
+        MasRepository.getFactoryProfitTotal()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
+
     // Cash in Hand - Munawar (Strictly ledger-based: Dr - Cr)
     val munawarCash = combine(cashBankAccounts, cashBankTxns, partyAccounts, journal) { accountsList, txnsList, parties, _ ->
         val munParty = parties.find { it.accountType == PartyAccountType.CashInHand && it.name.contains("Munawar", ignoreCase = true) }
@@ -299,7 +309,25 @@ class MasViewModel : ViewModel() {
             )
         }
 
-        // 3. Cash & Bank Accounts
+        // 3. Factory Accounts (Classified as Factory Receivable for Dr and Factory Profit for Cr)
+        val factoryParties = partyAccounts.value.filter { it.accountType == PartyAccountType.Factory }
+        factoryParties.forEach { p ->
+            val bal = MasRepository.getPartyLedgerBalance(p)
+            val sub = if (bal.drCrIndicator == "Dr") "Factory Receivable (Dr)" else "Factory Profit (Cr)"
+            list.add(
+                AccountPickerOption(
+                    id = p.id,
+                    code = p.code,
+                    name = p.name,
+                    category = "Factory",
+                    balance = bal.currentBalance,
+                    drCrIndicator = bal.drCrIndicator,
+                    subtitle = sub
+                )
+            )
+        }
+
+        // 4. Cash & Bank Accounts
         cashBankAccounts.value.forEach { acc ->
             val bal = if (acc.kind == "Cash") {
                 val cal = getCashAccountBalance(acc.name)
@@ -322,7 +350,7 @@ class MasViewModel : ViewModel() {
             )
         }
 
-        // 4. Other Chart of Accounts (Expenses, Revenues, Equity, Fixed Assets)
+        // 5. Other Chart of Accounts (Expenses, Revenues, Equity, Fixed Assets)
         accounts.value.forEach { acc ->
             if (list.none { opt: AccountPickerOption -> opt.name.equals(acc.name, ignoreCase = true) || opt.code.equals(acc.code, ignoreCase = true) }) {
                 val bal = MasRepository.getAccountLedgerBalance(acc)
@@ -341,6 +369,16 @@ class MasViewModel : ViewModel() {
         }
 
         return list
+    }
+
+    // Party Account Ledger Balance helper
+    fun getPartyLedgerBalance(party: PartyAccount): AccountLedgerBalance {
+        return MasRepository.getPartyLedgerBalance(party)
+    }
+
+    // Factory Accounts Ledger Summary
+    fun getFactoryAccountsLedgerBalances(): List<AccountLedgerBalance> {
+        return MasRepository.getFactoryAccountsLedgerBalances()
     }
 
     // Factory Stock Synchronization Records
