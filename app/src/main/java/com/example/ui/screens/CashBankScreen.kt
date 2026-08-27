@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -374,13 +376,20 @@ fun CashBankEntryForm(
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     var type by remember { mutableStateOf("Receipt") } // Receipt, Payment
     var selectedAccId by remember { mutableStateOf(accounts.firstOrNull()?.id ?: "") }
-    var contraAccount by remember { mutableStateOf("Other Income") }
+    var contraAccount by remember { mutableStateOf("Sales Revenue") }
     var description by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(sdf.format(Date())) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val accountPickerOptions = remember(viewModel.partyAccounts, viewModel.accounts, viewModel.cashBankAccounts) {
+        viewModel.getAllAccountPickerOptions()
+    }
 
     val amountVal = amount.toDoubleOrNull() ?: 0.0
-    val canSave = description.isNotBlank() && amountVal > 0.0
+    val currentAcc = accounts.find { it.id == selectedAccId }
+    val isSameAccount = currentAcc != null && currentAcc.name.equals(contraAccount, ignoreCase = true)
+    val canSave = description.isNotBlank() && amountVal > 0.0 && selectedAccId.isNotBlank() && contraAccount.isNotBlank() && !isSameAccount
 
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -392,73 +401,257 @@ fun CashBankEntryForm(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Cash / Bank Transaction Voucher", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Cash / Bank Transaction Voucher", fontWeight = FontWeight.Bold, fontSize = 15.sp)
 
+                    // 1. Interactive Receipt / Payment Toggle Buttons (Requirement 5)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "TRANSACTION TYPE",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            // Receipt Button (Inflow)
+                            Button(
+                                onClick = {
+                                    type = "Receipt"
+                                    if (contraAccount.isBlank() || contraAccount == "General Expenses") {
+                                        contraAccount = "Sales Revenue"
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).height(42.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (type == "Receipt") MasGreen else Color.Transparent,
+                                    contentColor = if (type == "Receipt") Color.White else MaterialTheme.colorScheme.onSurface
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                elevation = if (type == "Receipt") ButtonDefaults.buttonElevation(defaultElevation = 2.dp) else ButtonDefaults.buttonElevation(0.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Receipt (Inflow)", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                                }
+                            }
+
+                            // Payment Button (Outflow)
+                            Button(
+                                onClick = {
+                                    type = "Payment"
+                                    if (contraAccount.isBlank() || contraAccount == "Sales Revenue") {
+                                        contraAccount = "General Expenses"
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).height(42.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (type == "Payment") MasRed else Color.Transparent,
+                                    contentColor = if (type == "Payment") Color.White else MaterialTheme.colorScheme.onSurface
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                elevation = if (type == "Payment") ButtonDefaults.buttonElevation(defaultElevation = 2.dp) else ButtonDefaults.buttonElevation(0.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.ArrowUpward, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Payment (Outflow)", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                                }
+                            }
+                        }
+
+                        // Informational entry hint
+                        Surface(
+                            color = if (type == "Receipt") MasGreenSoft else MasRedLight,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (type == "Receipt")
+                                    "✓ INFLOW: [Dr] ${currentAcc?.name ?: "Cash/Bank Account"}  ⇄  [Cr] $contraAccount"
+                                else
+                                    "✓ OUTFLOW: [Dr] $contraAccount  ⇄  [Cr] ${currentAcc?.name ?: "Cash/Bank Account"}",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (type == "Receipt") MasGreen else MasRed,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+
+                    // 2. Deposit / Payment Account Selector
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = if (type == "Receipt") "DEPOSIT INTO (CASH / BANK ACCOUNT)" else "PAY FROM (CASH / BANK ACCOUNT)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        var accExpanded by remember { mutableStateOf(false) }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            OutlinedCard(
+                                modifier = Modifier.fillMaxWidth().clickable { accExpanded = true },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, MasRed)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            if (currentAcc?.kind == "Bank") Icons.Default.AccountBalance else Icons.Default.Money,
+                                            contentDescription = null,
+                                            tint = MasRed,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            currentAcc?.let { "${it.name} (${it.kind})" } ?: "Select Account",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                }
+                            }
+                            DropdownMenu(expanded = accExpanded, onDismissRequest = { accExpanded = false }) {
+                                accounts.forEach { acc ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(if (acc.kind == "Bank") Icons.Default.AccountBalance else Icons.Default.Money, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("${acc.name} (${acc.kind})")
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedAccId = acc.id
+                                            accExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Searchable Contra Account Picker (Requirement 6)
+                    SearchableAccountPicker(
+                        label = if (type == "Receipt") "RECEIVED FROM / CONTRA ACCOUNT (CREDIT)" else "PAID TO / CONTRA ACCOUNT (DEBIT)",
+                        selectedAccountName = contraAccount,
+                        options = accountPickerOptions,
+                        onAccountSelected = { opt ->
+                            contraAccount = opt.name
+                            if (description.isBlank()) {
+                                description = if (type == "Receipt") "Received from ${opt.name}" else "Payment to ${opt.name}"
+                            }
+                        },
+                        placeholder = "Search party, customer, supplier or GL account...",
+                        hideZeroBalancesByDefault = false
+                    )
+
+                    // 4. Amount and Date
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(value = type, onValueChange = { type = it }, label = { Text("Type (Receipt/Payment)") }, modifier = Modifier.weight(1f))
-                        OutlinedTextField(value = date, onValueChange = { date = it }, label = { Text("Date") }, modifier = Modifier.weight(1f))
+                        OutlinedTextField(
+                            value = amount,
+                            onValueChange = {
+                                amount = it
+                                errorMessage = null
+                            },
+                            label = { Text("Amount (Rs)") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            isError = amount.isNotBlank() && (amountVal <= 0.0)
+                        )
+                        OutlinedTextField(
+                            value = date,
+                            onValueChange = { date = it },
+                            label = { Text("Date (YYYY-MM-DD)") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
                     }
 
-                    Text(if (type == "Receipt") "Deposit to Account" else "Pay from Account", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    var accExpanded by remember { mutableStateOf(false) }
-                    val currentAcc = accounts.find { it.id == selectedAccId }
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        OutlinedCard(modifier = Modifier.fillMaxWidth().clickable { accExpanded = true }, shape = RoundedCornerShape(8.dp)) {
-                            Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(currentAcc?.name ?: "Select Account", fontSize = 13.sp)
-                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                            }
-                        }
-                        DropdownMenu(expanded = accExpanded, onDismissRequest = { accExpanded = false }) {
-                            accounts.forEach { acc ->
-                                DropdownMenuItem(text = { Text("${acc.name} (${acc.kind})") }, onClick = {
-                                    selectedAccId = acc.id
-                                    accExpanded = false
-                                })
-                            }
-                        }
-                    }
+                    // 5. Narration
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = {
+                            description = it
+                            errorMessage = null
+                        },
+                        label = { Text("Narration / Purpose / Remarks") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
 
-                    OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Narration / Purpose") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = contraAccount, onValueChange = { contraAccount = it }, label = { Text("Contra Account (e.g. Sales, Rent, Capital)") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Amount") }, modifier = Modifier.fillMaxWidth())
+                    // Validation warning
+                    if (isSameAccount) {
+                        Text("Error: Deposit account and contra account cannot be the same.", color = MasRed, fontSize = 11.5.sp)
+                    }
+                    errorMessage?.let {
+                        Text(it, color = MasRed, fontSize = 11.5.sp)
+                    }
 
                     Button(
                         onClick = {
-                            if (canSave) {
-                                val txn = CashBankTxn(
-                                    id = "${type.take(3).uppercase()}-${System.currentTimeMillis() % 10000}",
-                                    type = type,
-                                    accountId = selectedAccId,
-                                    date = date,
-                                    description = description.trim(),
-                                    contraAccount = contraAccount.trim(),
-                                    amount = amountVal
-                                )
-                                viewModel.cashBankTxns.value = viewModel.cashBankTxns.value + txn
+                            if (amountVal <= 0.0) {
+                                errorMessage = "Amount must be greater than zero."
+                                return@Button
+                            }
+                            if (description.isBlank()) {
+                                errorMessage = "Narration / description is required."
+                                return@Button
+                            }
+                            if (isSameAccount) {
+                                errorMessage = "Cannot post debit and credit to the exact same account."
+                                return@Button
+                            }
 
-                                val accName = currentAcc?.name ?: "Cash"
-                                val (debit, credit) = if (type == "Receipt") Pair(accName, contraAccount) else Pair(contraAccount, accName)
-                                viewModel.addJournalEntry(
-                                    JournalEntry(
-                                        id = "JE-${txn.id}",
-                                        date = date,
-                                        source = "Cash & Bank",
-                                        description = description.trim(),
-                                        reference = txn.id,
-                                        lines = listOf(JournalLine(debit, amountVal, 0.0), JournalLine(credit, 0.0, amountVal))
-                                    )
+                            val txn = CashBankTxn(
+                                id = "${type.take(3).uppercase()}-${System.currentTimeMillis() % 10000}",
+                                type = type,
+                                accountId = selectedAccId,
+                                date = date,
+                                description = description.trim(),
+                                contraAccount = contraAccount.trim(),
+                                amount = amountVal
+                            )
+                            viewModel.cashBankTxns.value = viewModel.cashBankTxns.value + txn
+
+                            val accName = currentAcc?.name ?: "Cash"
+                            val (debit, credit) = if (type == "Receipt") Pair(accName, contraAccount) else Pair(contraAccount, accName)
+                            val (posted, msg) = viewModel.addJournalEntry(
+                                JournalEntry(
+                                    id = "JE-${txn.id}",
+                                    date = date,
+                                    source = "Cash & Bank",
+                                    description = "${type}: ${description.trim()} ($accName ⇄ $contraAccount)",
+                                    reference = txn.id,
+                                    lines = listOf(JournalLine(debit, amountVal, 0.0), JournalLine(credit, 0.0, amountVal))
                                 )
+                            )
+                            if (posted) {
                                 onSaved()
+                            } else {
+                                errorMessage = msg
                             }
                         },
                         enabled = canSave,
-                        colors = ButtonDefaults.buttonColors(containerColor = MasRed),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (type == "Receipt") MasGreen else MasRed),
                         modifier = Modifier.fillMaxWidth().height(46.dp),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("Record Transaction", fontWeight = FontWeight.Bold)
+                        Icon(if (type == "Receipt") Icons.Default.Check else Icons.Default.Payment, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Record ${type} (Rs ${formatMoney(amountVal, "")})", fontWeight = FontWeight.Bold)
                     }
                 }
             }

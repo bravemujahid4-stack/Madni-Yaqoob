@@ -743,13 +743,14 @@ object MasRepository {
         return false
     }
 
-    // Double-Entry Integrity Check across all posted entries
+    // Double-Entry Integrity Check across ALL accounts combined in the complete ledger
     fun checkDoubleEntryIntegrity(): DoubleEntryIntegrityCheck {
         val postedEntries = journal.value.filter { it.status == "Posted" }
         var sumDebits = 0.0
         var sumCredits = 0.0
         val imbalanced = mutableListOf<JournalEntry>()
 
+        // 1. Sum up all posted journal entries
         postedEntries.forEach { entry ->
             val entryDr = entry.lines.sumOf { it.debit }
             val entryCr = entry.lines.sumOf { it.credit }
@@ -760,14 +761,171 @@ object MasRepository {
             }
         }
 
-        val diff = Math.abs(sumDebits - sumCredits)
+        // 2. Include opening balances of all Chart of Accounts & Party Accounts
+        val systemAccounts = accounts.value
+        val partyList = partyAccounts.value
+
+        var openingDr = 0.0
+        var openingCr = 0.0
+
+        // COA opening balances
+        systemAccounts.forEach { acc ->
+            if (acc.nature.equals("Debit", ignoreCase = true)) {
+                openingDr += acc.opening
+            } else {
+                openingCr += acc.opening
+            }
+        }
+
+        // Party opening balances not already in COA
+        partyList.forEach { party ->
+            if (systemAccounts.none { it.code.equals(party.code, ignoreCase = true) }) {
+                if (party.balanceType.equals("Debit", ignoreCase = true) || party.balanceType.equals("Dr", ignoreCase = true)) {
+                    openingDr += party.openingBalance
+                } else if (party.balanceType.equals("Credit", ignoreCase = true) || party.balanceType.equals("Cr", ignoreCase = true)) {
+                    openingCr += party.openingBalance
+                }
+            }
+        }
+
+        val totalAllDr = sumDebits + openingDr
+        val totalAllCr = sumCredits + openingCr
+        val diff = Math.abs(totalAllDr - totalAllCr)
+
         return DoubleEntryIntegrityCheck(
             isBalanced = diff <= 0.01 && imbalanced.isEmpty(),
-            totalDebits = sumDebits,
-            totalCredits = sumCredits,
+            totalDebits = totalAllDr,
+            totalCredits = totalAllCr,
             difference = diff,
             imbalancedEntries = imbalanced
         )
+    }
+
+    // Helper: Customer balance calculation from Double-Entry Ledger & Sales Subsystem
+    fun getCustomerLedgerBalance(customerIdentifier: String): Double {
+        val cust = customers.value.find { it.id.equals(customerIdentifier, ignoreCase = true) || it.name.equals(customerIdentifier, ignoreCase = true) }
+        val party = partyAccounts.value.find { it.accountType == PartyAccountType.Customer && (it.id.equals(customerIdentifier, ignoreCase = true) || it.code.equals(customerIdentifier, ignoreCase = true) || it.name.equals(customerIdentifier, ignoreCase = true)) }
+
+        val name = party?.name ?: cust?.name ?: customerIdentifier
+        val code = party?.code ?: cust?.id ?: customerIdentifier
+
+        val signedOpening = if (party != null) {
+            if (party.balanceType.equals("Credit", ignoreCase = true) || party.balanceType.equals("Cr", ignoreCase = true) || party.balanceType.contains("Give", ignoreCase = true)) {
+                -party.openingBalance
+            } else {
+                party.openingBalance
+            }
+        } else {
+            cust?.openingBalance ?: 0.0
+        }
+
+        // Credit Invoices (Dr Customer)
+        val creditInvoices = salesDocs.value.filter {
+            (it.customerId.equals(code, ignoreCase = true) || it.customerId.equals(name, ignoreCase = true)) &&
+            it.type == "Sales Invoice" && it.status == "Posted" && it.saleType != "Cash"
+        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+        // Sales Returns (Cr Customer)
+        val returns = salesDocs.value.filter {
+            (it.customerId.equals(code, ignoreCase = true) || it.customerId.equals(name, ignoreCase = true)) &&
+            it.type == "Sales Return"
+        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+        // Customer Payments / Receipts received (Cr Customer)
+        val directReceipts = salesDocs.value.filter {
+            (it.customerId.equals(code, ignoreCase = true) || it.customerId.equals(name, ignoreCase = true)) &&
+            it.type == "Customer Payment"
+        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+        val cashTxnReceipts = cashBankTxns.value.filter { txn ->
+            txn.type == "Receipt" && (
+                txn.contraAccount.equals(name, ignoreCase = true) ||
+                txn.contraAccount.equals(code, ignoreCase = true) ||
+                txn.description.contains(name, ignoreCase = true) ||
+                txn.description.contains(code, ignoreCase = true)
+            )
+        }.sumOf { it.amount }
+
+        // Journal debits and credits
+        val journalEntries = journal.value.filter { it.status == "Posted" }
+        var glDr = 0.0
+        var glCr = 0.0
+        journalEntries.forEach { entry ->
+            // Exclude already counted subsystem source entries to prevent double count
+            if (entry.source != "Sales" && entry.source != "Receipts") {
+                entry.lines.forEach { line ->
+                    if (line.account.equals(name, ignoreCase = true) || line.account.equals(code, ignoreCase = true) || line.account.startsWith("$name (", ignoreCase = true)) {
+                        glDr += line.debit
+                        glCr += line.credit
+                    }
+                }
+            }
+        }
+
+        return signedOpening + creditInvoices + glDr - returns - directReceipts - cashTxnReceipts - glCr
+    }
+
+    // Helper: Supplier balance calculation from Double-Entry Ledger & Purchase Subsystem
+    fun getSupplierLedgerBalance(supplierIdentifier: String): Double {
+        val supp = suppliers.value.find { it.id.equals(supplierIdentifier, ignoreCase = true) || it.name.equals(supplierIdentifier, ignoreCase = true) }
+        val party = partyAccounts.value.find { it.accountType == PartyAccountType.Supplier && (it.id.equals(supplierIdentifier, ignoreCase = true) || it.code.equals(supplierIdentifier, ignoreCase = true) || it.name.equals(supplierIdentifier, ignoreCase = true)) }
+
+        val name = party?.name ?: supp?.name ?: supplierIdentifier
+        val code = party?.code ?: supp?.id ?: supplierIdentifier
+
+        val signedOpening = if (party != null) {
+            if (party.balanceType.equals("Debit", ignoreCase = true) || party.balanceType.equals("Dr", ignoreCase = true) || party.balanceType.contains("Get", ignoreCase = true)) {
+                -party.openingBalance
+            } else {
+                party.openingBalance
+            }
+        } else {
+            supp?.openingBalance ?: 0.0
+        }
+
+        // Credit Purchase Bills (Cr Supplier)
+        val creditBills = purchaseDocs.value.filter {
+            (it.supplierId.equals(code, ignoreCase = true) || it.supplierId.equals(name, ignoreCase = true)) &&
+            it.type == "Purchase Bill" && it.status == "Posted" && it.saleType != "Cash"
+        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+        // Purchase Returns (Dr Supplier)
+        val returns = purchaseDocs.value.filter {
+            (it.supplierId.equals(code, ignoreCase = true) || it.supplierId.equals(name, ignoreCase = true)) &&
+            it.type == "Purchase Return"
+        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+        // Supplier Payments made (Dr Supplier)
+        val directPayments = purchaseDocs.value.filter {
+            (it.supplierId.equals(code, ignoreCase = true) || it.supplierId.equals(name, ignoreCase = true)) &&
+            it.type == "Supplier Payment"
+        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
+
+        val cashTxnPayments = cashBankTxns.value.filter { txn ->
+            txn.type == "Payment" && (
+                txn.contraAccount.equals(name, ignoreCase = true) ||
+                txn.contraAccount.equals(code, ignoreCase = true) ||
+                txn.description.contains(name, ignoreCase = true) ||
+                txn.description.contains(code, ignoreCase = true)
+            )
+        }.sumOf { it.amount }
+
+        // Journal debits and credits
+        val journalEntries = journal.value.filter { it.status == "Posted" }
+        var glDr = 0.0
+        var glCr = 0.0
+        journalEntries.forEach { entry ->
+            if (entry.source != "Purchases" && entry.source != "Payments") {
+                entry.lines.forEach { line ->
+                    if (line.account.equals(name, ignoreCase = true) || line.account.equals(code, ignoreCase = true) || line.account.startsWith("$name (", ignoreCase = true)) {
+                        glDr += line.debit
+                        glCr += line.credit
+                    }
+                }
+            }
+        }
+
+        return signedOpening + creditBills + glCr - returns - directPayments - cashTxnPayments - glDr
     }
 
     // Stock Transfer between any two locations (Factory / Warehouse)

@@ -545,3 +545,342 @@ fun SearchBarField(
         modifier = modifier
     )
 }
+
+data class AccountPickerOption(
+    val id: String,
+    val code: String,
+    val name: String,
+    val category: String, // Customer, Supplier, Cash in Hand, Bank, Expense, Revenue, Owner, etc.
+    val balance: Double = 0.0,
+    val drCrIndicator: String = "",
+    val subtitle: String = ""
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchableAccountPicker(
+    label: String,
+    selectedAccountName: String,
+    options: List<AccountPickerOption>,
+    onAccountSelected: (AccountPickerOption) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "Search or select account / party...",
+    filterCategories: List<String> = listOf("All", "Customer", "Supplier", "Cash", "Bank", "Expense", "Revenue", "Owner"),
+    allowCustomEntry: Boolean = true,
+    hideZeroBalancesByDefault: Boolean = false
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("All") }
+    var hideZeroBalances by remember { mutableStateOf(hideZeroBalancesByDefault) }
+    var customInput by remember { mutableStateOf("") }
+
+    val selectedOption = options.find { it.name.equals(selectedAccountName, ignoreCase = true) || it.id.equals(selectedAccountName, ignoreCase = true) || it.code.equals(selectedAccountName, ignoreCase = true) }
+
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    searchQuery = ""
+                    selectedCategory = "All"
+                    showDialog = true
+                },
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, if (selectedAccountName.isNotBlank()) MasRed else MaterialTheme.colorScheme.outline),
+            colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (selectedAccountName.isNotBlank()) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        val icon = when {
+                            selectedOption?.category?.contains("Customer", ignoreCase = true) == true -> Icons.Default.Person
+                            selectedOption?.category?.contains("Supplier", ignoreCase = true) == true -> Icons.Default.LocalShipping
+                            selectedOption?.category?.contains("Cash", ignoreCase = true) == true -> Icons.Default.Money
+                            selectedOption?.category?.contains("Bank", ignoreCase = true) == true -> Icons.Default.AccountBalance
+                            selectedOption?.category?.contains("Expense", ignoreCase = true) == true -> Icons.Default.Receipt
+                            selectedOption?.category?.contains("Revenue", ignoreCase = true) == true -> Icons.Default.TrendingUp
+                            else -> Icons.Default.AccountBox
+                        }
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = MasRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = selectedAccountName,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (selectedOption != null) {
+                                Text(
+                                    text = "${selectedOption.category} · ${selectedOption.code} ${if (selectedOption.balance != 0.0) "· ${formatMoney(selectedOption.balance)} ${selectedOption.drCrIndicator}" else ""}",
+                                    fontSize = 11.sp,
+                                    color = MasMuted
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = MasMuted, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(placeholder, fontSize = 13.sp, color = MasMuted)
+                    }
+                }
+                Icon(Icons.Default.ArrowDropDown, contentDescription = "Select", tint = MasMuted)
+            }
+        }
+    }
+
+    if (showDialog) {
+        val filteredOptions = options.filter { opt ->
+            val matchQuery = searchQuery.isBlank() ||
+                    opt.name.contains(searchQuery, ignoreCase = true) ||
+                    opt.code.contains(searchQuery, ignoreCase = true) ||
+                    opt.category.contains(searchQuery, ignoreCase = true) ||
+                    opt.subtitle.contains(searchQuery, ignoreCase = true)
+
+            val matchCategory = when (selectedCategory) {
+                "All" -> true
+                "Customer" -> opt.category.contains("Customer", ignoreCase = true)
+                "Supplier" -> opt.category.contains("Supplier", ignoreCase = true)
+                "Cash" -> opt.category.contains("Cash", ignoreCase = true)
+                "Bank" -> opt.category.contains("Bank", ignoreCase = true)
+                "Expense" -> opt.category.contains("Expense", ignoreCase = true)
+                "Revenue" -> opt.category.contains("Revenue", ignoreCase = true) || opt.category.contains("Income", ignoreCase = true) || opt.category.contains("Sales", ignoreCase = true)
+                "Owner" -> opt.category.contains("Owner", ignoreCase = true) || opt.category.contains("Capital", ignoreCase = true) || opt.category.contains("Investor", ignoreCase = true)
+                else -> opt.category.contains(selectedCategory, ignoreCase = true)
+            }
+
+            val matchZeroBalance = if (hideZeroBalances && (opt.category.contains("Customer", ignoreCase = true) || opt.category.contains("Supplier", ignoreCase = true))) {
+                Math.abs(opt.balance) > 0.001
+            } else {
+                true
+            }
+
+            matchQuery && matchCategory && matchZeroBalance
+        }
+
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Select Account / Party",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    IconButton(onClick = { showDialog = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Search Bar
+                    SearchBarField(
+                        query = searchQuery,
+                        onQueryChange = { searchQuery = it },
+                        placeholder = "Type name or code to filter..."
+                    )
+
+                    // Category Filter Chips
+                    androidx.compose.foundation.lazy.LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(filterCategories.size) { idx ->
+                            val cat = filterCategories[idx]
+                            FilterChip(
+                                selected = selectedCategory == cat,
+                                onClick = { selectedCategory = cat },
+                                label = { Text(cat, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    // Zero Balance Filter Toggle
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { hideZeroBalances = !hideZeroBalances }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Hide Rs 0.00 Balances (Due only)",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Switch(
+                            checked = hideZeroBalances,
+                            onCheckedChange = { hideZeroBalances = it },
+                            modifier = Modifier.height(24.dp)
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+
+                    // Accounts List
+                    if (filteredOptions.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Default.SearchOff, contentDescription = null, tint = MasMuted, modifier = Modifier.size(32.dp))
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text("No matching accounts found", fontSize = 13.sp, color = MasMuted)
+                            if (allowCustomEntry && searchQuery.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = {
+                                        onAccountSelected(
+                                            AccountPickerOption(
+                                                id = "CUSTOM-${System.currentTimeMillis() % 10000}",
+                                                code = "CUSTOM",
+                                                name = searchQuery.trim(),
+                                                category = "Custom Account"
+                                            )
+                                        )
+                                        showDialog = false
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MasRed),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Use '${searchQuery.trim()}' as Contra Account", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    } else {
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.weight(1f, fill = false),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(filteredOptions.size) { idx ->
+                                val opt = filteredOptions[idx]
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (opt.name.equals(selectedAccountName, ignoreCase = true)) MasRed else MaterialTheme.colorScheme.outline
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onAccountSelected(opt)
+                                            showDialog = false
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = opt.name,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(
+                                                    color = when {
+                                                        opt.category.contains("Customer", ignoreCase = true) -> MasGreenSoft
+                                                        opt.category.contains("Supplier", ignoreCase = true) -> MasRedLight
+                                                        opt.category.contains("Cash", ignoreCase = true) -> MasGreenSoft
+                                                        opt.category.contains("Bank", ignoreCase = true) -> MasBlueSoft
+                                                        opt.category.contains("Expense", ignoreCase = true) -> MasAmberSoft
+                                                        else -> MasPaperSoft
+                                                    },
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = opt.category,
+                                                        fontSize = 9.5.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = when {
+                                                            opt.category.contains("Customer", ignoreCase = true) -> MasGreen
+                                                            opt.category.contains("Supplier", ignoreCase = true) -> MasRed
+                                                            opt.category.contains("Cash", ignoreCase = true) -> MasGreen
+                                                            opt.category.contains("Bank", ignoreCase = true) -> MasBlue
+                                                            opt.category.contains("Expense", ignoreCase = true) -> MasAmber
+                                                            else -> MasInk
+                                                        },
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = "Code: ${opt.code} ${if (opt.subtitle.isNotBlank()) "· ${opt.subtitle}" else ""}",
+                                                fontSize = 11.sp,
+                                                color = MasMuted
+                                            )
+                                        }
+                                        if (opt.balance != 0.0) {
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text(
+                                                    text = "${formatMoney(Math.abs(opt.balance))} ${opt.drCrIndicator}",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    color = if (opt.drCrIndicator == "Dr") MasGreen else MasRed
+                                                )
+                                                Text(
+                                                    text = "Balance",
+                                                    fontSize = 9.5.sp,
+                                                    color = MasMuted
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}

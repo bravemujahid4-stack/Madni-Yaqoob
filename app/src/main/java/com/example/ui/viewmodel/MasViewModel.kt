@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
+import com.example.ui.components.AccountPickerOption
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -70,44 +71,12 @@ class MasViewModel : ViewModel() {
 
     // Helper: Customer balance calculation from Double-Entry Ledger & Sales Subsystem
     fun getCustomerBalance(customerId: String): Double {
-        val cust = customers.value.find { it.id == customerId } ?: return 0.0
-        val opening = cust.openingBalance
-        // Credit invoices
-        val creditInvoices = salesDocs.value.filter {
-            it.customerId == customerId && it.type == "Sales Invoice" && it.status == "Posted" && it.saleType != "Cash"
-        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
-
-        val returns = salesDocs.value.filter { it.customerId == customerId && it.type == "Sales Return" }
-            .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
-
-        val payments = salesDocs.value.filter { it.customerId == customerId && it.type == "Customer Payment" }
-            .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } } +
-            cashBankTxns.value.filter {
-                it.type == "Receipt" && (it.contraAccount == "Accounts Receivable" || it.description.contains(cust.name, ignoreCase = true)) && it.description.contains(cust.name, ignoreCase = true)
-            }.sumOf { it.amount }
-
-        return opening + creditInvoices - returns - payments
+        return MasRepository.getCustomerLedgerBalance(customerId)
     }
 
     // Helper: Supplier balance calculation from Double-Entry Ledger & Purchase Subsystem
     fun getSupplierBalance(supplierId: String): Double {
-        val supp = suppliers.value.find { it.id == supplierId } ?: return 0.0
-        val opening = supp.openingBalance
-        // Credit purchase bills
-        val creditBills = purchaseDocs.value.filter {
-            it.supplierId == supplierId && it.type == "Purchase Bill" && it.status == "Posted" && it.saleType != "Cash"
-        }.sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
-
-        val returns = purchaseDocs.value.filter { it.supplierId == supplierId && it.type == "Purchase Return" }
-            .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } }
-
-        val payments = purchaseDocs.value.filter { it.supplierId == supplierId && it.type == "Supplier Payment" }
-            .sumOf { doc -> doc.items.sumOf { it.qty * it.rate } } +
-            cashBankTxns.value.filter {
-                it.type == "Payment" && (it.contraAccount == "Accounts Payable" || it.description.contains(supp.name, ignoreCase = true)) && it.description.contains(supp.name, ignoreCase = true)
-            }.sumOf { it.amount }
-
-        return opening + creditBills - returns - payments
+        return MasRepository.getSupplierLedgerBalance(supplierId)
     }
 
     // Double-Entry Ledger Balance Calculation for any Account
@@ -148,13 +117,21 @@ class MasViewModel : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
     // Total Receivable: Sum of Customer debit balances from ledger (NEVER mixed with cash in hand)
-    val totalReceivable = combine(customers, salesDocs, cashBankTxns, journal) { custList, _, _, _ ->
-        custList.sumOf { getCustomerBalance(it.id).coerceAtLeast(0.0) }
+    val totalReceivable = combine(customers, partyAccounts, salesDocs, cashBankTxns, journal) { custList, parties, _, _, _ ->
+        val allCustomerCodes = (custList.map { it.id } + parties.filter { it.accountType == PartyAccountType.Customer }.map { it.code }).distinct()
+        allCustomerCodes.sumOf { custCode ->
+            val bal = MasRepository.getCustomerLedgerBalance(custCode)
+            if (bal > 0.001) bal else 0.0
+        }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
     // Total Payable: Sum of Supplier credit balances from ledger (NEVER mixed with cash in hand)
-    val totalPayable = combine(suppliers, purchaseDocs, cashBankTxns, journal) { suppList, _, _, _ ->
-        suppList.sumOf { getSupplierBalance(it.id).coerceAtLeast(0.0) }
+    val totalPayable = combine(suppliers, partyAccounts, purchaseDocs, cashBankTxns, journal) { suppList, parties, _, _, _ ->
+        val allSupplierCodes = (suppList.map { it.id } + parties.filter { it.accountType == PartyAccountType.Supplier }.map { it.code }).distinct()
+        allSupplierCodes.sumOf { suppCode ->
+            val bal = MasRepository.getSupplierLedgerBalance(suppCode)
+            if (bal > 0.001) bal else 0.0
+        }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0.0)
 
     // Cash in Hand - Munawar (Strictly ledger-based: Dr - Cr)
@@ -252,6 +229,118 @@ class MasViewModel : ViewModel() {
             getCashAccountBalance("Munawar"),
             getCashAccountBalance("Khalid")
         )
+    }
+
+    // Helper to get all accounts formatted for SearchableAccountPicker with current live balances
+    fun getAllAccountPickerOptions(): List<AccountPickerOption> {
+        val list = mutableListOf<AccountPickerOption>()
+
+        // 1. Customers
+        val customerParties = partyAccounts.value.filter { it.accountType == PartyAccountType.Customer }
+        val customerCodes = customerParties.map { it.code }.toSet()
+        customerParties.forEach { p ->
+            val bal = MasRepository.getCustomerLedgerBalance(p.code)
+            list.add(
+                AccountPickerOption(
+                    id = p.id,
+                    code = p.code,
+                    name = p.name,
+                    category = "Customer",
+                    balance = bal,
+                    drCrIndicator = if (bal >= 0) "Dr" else "Cr",
+                    subtitle = p.phone
+                )
+            )
+        }
+        customers.value.filter { it.id !in customerCodes }.forEach { c ->
+            val bal = MasRepository.getCustomerLedgerBalance(c.id)
+            list.add(
+                AccountPickerOption(
+                    id = c.id,
+                    code = c.id,
+                    name = c.name,
+                    category = "Customer",
+                    balance = bal,
+                    drCrIndicator = if (bal >= 0) "Dr" else "Cr",
+                    subtitle = c.phone
+                )
+            )
+        }
+
+        // 2. Suppliers
+        val supplierParties = partyAccounts.value.filter { it.accountType == PartyAccountType.Supplier }
+        val supplierCodes = supplierParties.map { it.code }.toSet()
+        supplierParties.forEach { p ->
+            val bal = MasRepository.getSupplierLedgerBalance(p.code)
+            list.add(
+                AccountPickerOption(
+                    id = p.id,
+                    code = p.code,
+                    name = p.name,
+                    category = "Supplier",
+                    balance = bal,
+                    drCrIndicator = if (bal >= 0) "Cr" else "Dr",
+                    subtitle = p.phone
+                )
+            )
+        }
+        suppliers.value.filter { it.id !in supplierCodes }.forEach { s ->
+            val bal = MasRepository.getSupplierLedgerBalance(s.id)
+            list.add(
+                AccountPickerOption(
+                    id = s.id,
+                    code = s.id,
+                    name = s.name,
+                    category = "Supplier",
+                    balance = bal,
+                    drCrIndicator = if (bal >= 0) "Cr" else "Dr",
+                    subtitle = s.phone
+                )
+            )
+        }
+
+        // 3. Cash & Bank Accounts
+        cashBankAccounts.value.forEach { acc ->
+            val bal = if (acc.kind == "Cash") {
+                val cal = getCashAccountBalance(acc.name)
+                if (cal.drCrIndicator == "Dr") cal.currentBalance else -cal.currentBalance
+            } else {
+                val inTx = cashBankTxns.value.filter { it.accountId == acc.id && it.type == "Receipt" || it.toAccountId == acc.id }.sumOf { it.amount }
+                val outTx = cashBankTxns.value.filter { it.accountId == acc.id && it.type == "Payment" || it.fromAccountId == acc.id }.sumOf { it.amount }
+                acc.openingBalance + inTx - outTx
+            }
+            list.add(
+                AccountPickerOption(
+                    id = acc.id,
+                    code = acc.id,
+                    name = acc.name,
+                    category = if (acc.kind == "Cash") "Cash in Hand" else "Bank",
+                    balance = Math.abs(bal),
+                    drCrIndicator = if (bal >= 0) "Dr" else "Cr",
+                    subtitle = acc.bankName ?: acc.kind
+                )
+            )
+        }
+
+        // 4. Other Chart of Accounts (Expenses, Revenues, Equity, Fixed Assets)
+        accounts.value.forEach { acc ->
+            if (list.none { opt: AccountPickerOption -> opt.name.equals(acc.name, ignoreCase = true) || opt.code.equals(acc.code, ignoreCase = true) }) {
+                val bal = MasRepository.getAccountLedgerBalance(acc)
+                list.add(
+                    AccountPickerOption(
+                        id = acc.id,
+                        code = acc.code,
+                        name = acc.name,
+                        category = acc.category.ifBlank { acc.type.name },
+                        balance = bal.currentBalance,
+                        drCrIndicator = bal.drCrIndicator,
+                        subtitle = acc.type.name
+                    )
+                )
+            }
+        }
+
+        return list
     }
 
     // Factory Stock Synchronization Records

@@ -50,6 +50,10 @@ fun DashboardScreen(
 
     val customers by viewModel.customers.collectAsState()
     val suppliers by viewModel.suppliers.collectAsState()
+    val partyAccounts by viewModel.partyAccounts.collectAsState()
+    val cashBankTxns by viewModel.cashBankTxns.collectAsState()
+    val salesDocs by viewModel.salesDocs.collectAsState()
+    val accounts by viewModel.accounts.collectAsState()
     val auditLog by viewModel.auditLog.collectAsState()
     val journal by viewModel.journal.collectAsState()
 
@@ -118,9 +122,11 @@ fun DashboardScreen(
             }
         }
 
-        // Double-Entry Integrity Badge
+        // Double-Entry Integrity Badge (Calculated from ALL accounts combined)
         item {
-            val integrity = remember(journal) { viewModel.checkDoubleEntryIntegrity() }
+            val integrity = remember(journal, cashBankTxns, partyAccounts, customers, suppliers, accounts) {
+                viewModel.checkDoubleEntryIntegrity()
+            }
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = if (integrity.isBalanced) MasGreenSoft else MasRedLight
@@ -620,28 +626,58 @@ fun DashboardScreen(
                             Text("View All", color = MasRed, fontSize = 11.sp)
                         }
                     }
-                    customers.take(4).forEach { customer ->
-                        val bal = viewModel.getCustomerBalance(customer.id)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(customer.name, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
-                                Text("${customer.id} · ${customer.paymentTerms}", color = MasMuted, fontSize = 10.5.sp)
+                    val topReceivables = remember(customers, partyAccounts, salesDocs, cashBankTxns, journal) {
+                        val customerParties = partyAccounts.filter { it.accountType == PartyAccountType.Customer }
+                        val partyCodes = customerParties.map { it.code }.toSet()
+                        val list = mutableListOf<Pair<String, Pair<String, Double>>>()
+
+                        customerParties.forEach { p ->
+                            val bal = viewModel.getCustomerBalance(p.code)
+                            if (bal > 0.01) {
+                                list.add(Pair(p.name, Pair("${p.code} · ${p.phone}", bal)))
                             }
-                            Text(
-                                formatMoney(bal),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = if (bal > customer.creditLimit) MasRed else MasInk,
-                                fontFamily = FontFamily.Monospace
-                            )
                         }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                        customers.filter { it.id !in partyCodes }.forEach { c ->
+                            val bal = viewModel.getCustomerBalance(c.id)
+                            if (bal > 0.01) {
+                                list.add(Pair(c.name, Pair("${c.id} · ${c.paymentTerms}", bal)))
+                            }
+                        }
+                        list.sortedByDescending { it.second.second }.take(5)
+                    }
+
+                    if (topReceivables.isEmpty()) {
+                        Text(
+                            text = "No outstanding customer receivables.",
+                            color = MasMuted,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    } else {
+                        topReceivables.forEach { item ->
+                            val (name, details) = item
+                            val (sub, bal) = details
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(name, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
+                                    Text(sub, color = MasMuted, fontSize = 10.5.sp)
+                                }
+                                Text(
+                                    "${formatMoney(bal)} Dr",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MasGreen,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                        }
                     }
                 }
             }
